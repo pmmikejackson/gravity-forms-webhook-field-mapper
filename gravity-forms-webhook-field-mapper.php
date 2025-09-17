@@ -7,7 +7,12 @@
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
+ *
+ * @package GravityFormsWebhookFieldMapper
  */
+
+/** @noinspection PhpUndefinedFunctionInspection */
+/** @noinspection PhpUnused */
 
 // Prevent direct access
 if (!defined('ABSPATH')) {
@@ -42,13 +47,15 @@ class GF_Webhook_Field_Mapper {
     /**
      * Modify webhook data to use field names instead of IDs
      *
-     * @param array $request_data The data being sent to the webhook
-     * @param array $feed The webhook feed configuration
+     * @param array $request_data The data being sent to the webhook (unused but required by filter)
+     * @param array $feed The webhook feed configuration (unused but required by filter)
      * @param array $entry The form entry
      * @param array $form The form object
      * @return array Modified request data
+     *
+     * @noinspection PhpUnusedParameterInspection
      */
-    public function modify_webhook_data($request_data, $feed, $entry, $form) {
+    public function modify_webhook_data($request_data, $feed, $entry, $form) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter
         // Create new data array with field names (completely replace the original)
         $mapped_data = array();
 
@@ -123,7 +130,7 @@ class GF_Webhook_Field_Mapper {
                 // Handle list fields
                 $list_values = '';
                 if (isset($entry[$field_id])) {
-                    $list_values = maybe_unserialize($entry[$field_id]);
+                    $list_values = maybe_unserialize($entry[$field_id]); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_maybe_unserialize
                 }
 
                 // Always include the field, even if empty

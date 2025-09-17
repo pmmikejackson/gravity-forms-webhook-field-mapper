@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<ruleset name="Gravity Forms Webhook Field Mapper">
+    <description>PHP CodeSniffer configuration for Gravity Forms Webhook Field Mapper plugin</description>
+
+    <!-- Check all PHP files in the current directory and subdirectories -->
+    <file>.</file>
+
+    <!-- Exclude vendor directory -->
+    <exclude-pattern>*/vendor/*</exclude-pattern>
+    <exclude-pattern>*/node_modules/*</exclude-pattern>
+
+    <!-- Use WordPress coding standards -->
+    <rule ref="WordPress-Core">
+        <!-- Allow short array syntax -->
+        <exclude name="Generic.Arrays.DisallowShortArraySyntax"/>
+
+        <!-- Don't require strict comparison for in_array -->
+        <exclude name="WordPress.PHP.StrictInArray.MissingTrueStrict"/>
+
+        <!-- Allow usage of $_REQUEST -->
+        <exclude name="WordPress.Security.NonceVerification"/>
+    </rule>
+
+    <!-- Set minimum supported WordPress version -->
+    <config name="minimum_supported_wp_version" value="5.0"/>
+
+    <!-- Check for PHP compatibility -->
+    <config name="testVersion" value="7.0-"/>
+
+    <!-- Only check PHP files -->
+    <arg name="extensions" value="php"/>
+
+    <!-- Show progress and sniff codes -->
+    <arg value="ps"/>
+
+    <!-- Use colors in output -->
+    <arg name="colors"/>
+</ruleset>
