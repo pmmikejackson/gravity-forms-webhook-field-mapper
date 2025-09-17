@@ -1,0 +1,35 @@
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE Files
+.vscode/
+.idea/
+
+# WordPress
+wp-config.php
+wp-content/uploads/
+wp-content/upgrade/
+
+# Dependencies
+node_modules/
+vendor/
+
+# Build files
+*.zip
+dist/
+build/
+
+# Logs
+*.log
+error_log
+debug.log
+
+# Environment files
+.env
+.env.*
+
+# Backup files
+*.bak
+*.backup
+*~
