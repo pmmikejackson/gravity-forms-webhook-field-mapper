@@ -33,3 +33,6 @@ debug.log
 *.bak
 *.backup
 *~
+
+# Development documentation
+CLAUDE.md

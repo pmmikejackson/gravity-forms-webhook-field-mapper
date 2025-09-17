@@ -1,5 +1,5 @@
 === Gravity Forms Webhook Field Mapper ===
-Contributors: mikejackson
+Contributors: mikejackson, claude
 Tags: gravity forms, webhook, field mapping, api
 Requires at least: 5.0
 Tested up to: 6.4
