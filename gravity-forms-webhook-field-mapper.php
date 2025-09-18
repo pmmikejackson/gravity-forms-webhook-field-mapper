@@ -3,7 +3,7 @@
  * Plugin Name: Gravity Forms Webhook Field Mapper
  * Plugin URI: https://github.com/mjhome/gravity-forms-webhook-field-mapper
  * Description: Maps Gravity Forms field IDs to field names in webhook data
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
@@ -70,30 +70,31 @@ class GF_Webhook_Field_Mapper {
             $field_id = $field->id;
             $field_label = $this->get_field_label($field);
 
-            // Handle different field types
+            // Handle different field types with special sub-field structures
             if ($field->type == 'name') {
                 // Handle name fields with sub-fields
                 $name_parts = array();
 
-                $name_parts['first'] = isset($entry[$field_id . '.3']) ? $entry[$field_id . '.3'] : '';
-                $name_parts['last'] = isset($entry[$field_id . '.6']) ? $entry[$field_id . '.6'] : '';
+                // Always include all possible name sub-fields
                 $name_parts['prefix'] = isset($entry[$field_id . '.2']) ? $entry[$field_id . '.2'] : '';
-                $name_parts['suffix'] = isset($entry[$field_id . '.8']) ? $entry[$field_id . '.8'] : '';
+                $name_parts['first'] = isset($entry[$field_id . '.3']) ? $entry[$field_id . '.3'] : '';
                 $name_parts['middle'] = isset($entry[$field_id . '.4']) ? $entry[$field_id . '.4'] : '';
-                $name_parts['full'] = isset($entry[$field_id]) ? $entry[$field_id] : '';
+                $name_parts['last'] = isset($entry[$field_id . '.6']) ? $entry[$field_id . '.6'] : '';
+                $name_parts['suffix'] = isset($entry[$field_id . '.8']) ? $entry[$field_id . '.8'] : '';
 
-                // Remove empty sub-fields if you don't want them
-                $name_parts = array_filter($name_parts, function($value) {
-                    return $value !== '';
-                });
+                // Include full name if available
+                if (isset($entry[$field_id]) && $entry[$field_id] !== '') {
+                    $name_parts['full'] = $entry[$field_id];
+                }
 
-                // Always include the field, even if empty
-                $mapped_data[$field_label] = !empty($name_parts) ? $name_parts : '';
+                // Always include the field with all sub-fields
+                $mapped_data[$field_label] = $name_parts;
 
             } elseif ($field->type == 'address') {
                 // Handle address fields with sub-fields
                 $address_parts = array();
 
+                // Always include all address sub-fields
                 $address_parts['street'] = isset($entry[$field_id . '.1']) ? $entry[$field_id . '.1'] : '';
                 $address_parts['street2'] = isset($entry[$field_id . '.2']) ? $entry[$field_id . '.2'] : '';
                 $address_parts['city'] = isset($entry[$field_id . '.3']) ? $entry[$field_id . '.3'] : '';
@@ -101,13 +102,42 @@ class GF_Webhook_Field_Mapper {
                 $address_parts['zip'] = isset($entry[$field_id . '.5']) ? $entry[$field_id . '.5'] : '';
                 $address_parts['country'] = isset($entry[$field_id . '.6']) ? $entry[$field_id . '.6'] : '';
 
-                // Remove empty sub-fields if you don't want them
-                $address_parts = array_filter($address_parts, function($value) {
-                    return $value !== '';
-                });
+                // Always include the field with all sub-fields
+                $mapped_data[$field_label] = $address_parts;
 
-                // Always include the field, even if empty
-                $mapped_data[$field_label] = !empty($address_parts) ? $address_parts : '';
+            } elseif ($field->type == 'date') {
+                // Handle date fields with sub-fields
+                $date_parts = array();
+
+                if (is_array($field->inputs)) {
+                    // Date field with separate inputs (month, day, year)
+                    foreach ($field->inputs as $input) {
+                        $input_id = $input['id'];
+                        $input_label = !empty($input['label']) ? $this->sanitize_label($input['label']) : 'input_' . str_replace('.', '_', $input_id);
+                        $date_parts[$input_label] = isset($entry[$input_id]) ? $entry[$input_id] : '';
+                    }
+                    $mapped_data[$field_label] = $date_parts;
+                } else {
+                    // Single date input
+                    $mapped_data[$field_label] = isset($entry[$field_id]) ? $entry[$field_id] : '';
+                }
+
+            } elseif ($field->type == 'time') {
+                // Handle time fields with sub-fields
+                $time_parts = array();
+
+                if (is_array($field->inputs)) {
+                    // Time field with separate inputs (hour, minute, am/pm)
+                    foreach ($field->inputs as $input) {
+                        $input_id = $input['id'];
+                        $input_label = !empty($input['label']) ? $this->sanitize_label($input['label']) : 'input_' . str_replace('.', '_', $input_id);
+                        $time_parts[$input_label] = isset($entry[$input_id]) ? $entry[$input_id] : '';
+                    }
+                    $mapped_data[$field_label] = $time_parts;
+                } else {
+                    // Single time input
+                    $mapped_data[$field_label] = isset($entry[$field_id]) ? $entry[$field_id] : '';
+                }
 
             } elseif ($field->type == 'checkbox') {
                 // Handle checkbox fields
@@ -140,25 +170,31 @@ class GF_Webhook_Field_Mapper {
                 // Handle standard fields - always include them even if empty
                 $value = isset($entry[$field_id]) ? $entry[$field_id] : '';
 
-                // Skip fields with inputs here as we handle them separately
+                // Handle fields with multiple inputs
                 if (!is_array($field->inputs)) {
                     $mapped_data[$field_label] = $value;
                 } else {
-                    // For fields with inputs (like email with confirmation)
-                    $has_value = false;
+                    // For fields with inputs (like email with confirmation, date fields, time fields)
+                    $input_values = array();
+                    $has_multiple_inputs = count($field->inputs) > 1;
+
                     foreach ($field->inputs as $input) {
                         $input_id = $input['id'];
-                        if (isset($entry[$input_id]) && $entry[$input_id] !== '') {
-                            // Use the main field value if available
-                            $mapped_data[$field_label] = $entry[$input_id];
-                            $has_value = true;
-                            break;
+                        $input_label = !empty($input['label']) ? $this->sanitize_label($input['label']) : 'input_' . str_replace('.', '_', $input_id);
+                        $input_value = isset($entry[$input_id]) ? $entry[$input_id] : '';
+
+                        if ($has_multiple_inputs) {
+                            // Include all inputs as sub-fields
+                            $input_values[$input_label] = $input_value;
+                        } else {
+                            // Single input field - use the value directly
+                            $mapped_data[$field_label] = $input_value;
                         }
                     }
 
-                    // If no input has value, still include the field as empty
-                    if (!$has_value) {
-                        $mapped_data[$field_label] = '';
+                    if ($has_multiple_inputs) {
+                        // For multi-input fields, include all sub-fields
+                        $mapped_data[$field_label] = $input_values;
                     }
                 }
             }
