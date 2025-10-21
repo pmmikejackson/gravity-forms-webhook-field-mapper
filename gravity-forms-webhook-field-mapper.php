@@ -394,13 +394,15 @@ class GF_Webhook_Field_Mapper {
      * Add admin menu
      */
     public function add_admin_menu() {
+        // Use Gravity Forms toolbar menu with lower position number for bottom placement
         add_submenu_page(
-            'gf_edit_forms',
-            'Webhook Manager',
-            'Webhook Manager',
-            'manage_options',
-            'gf-webhook-manager',
-            array($this, 'render_admin_page')
+            'gf_edit_forms',                    // Parent slug
+            'Webhook Manager',                   // Page title
+            'Webhook Manager',                   // Menu title
+            'gform_full_access',                 // Capability (Gravity Forms specific)
+            'gf-webhook-manager',                // Menu slug
+            array($this, 'render_admin_page'),   // Callback
+            100                                   // Position (higher = lower in menu)
         );
     }
 
@@ -409,15 +411,25 @@ class GF_Webhook_Field_Mapper {
      */
     public function render_admin_page() {
         // Check user capabilities
-        if (!current_user_can('manage_options')) {
+        if (!current_user_can('gform_full_access') && !current_user_can('manage_options')) {
             wp_die(__('You do not have sufficient permissions to access this page.'));
         }
 
+        // Enqueue Gravity Forms admin styles for consistency
+        wp_enqueue_style('gform_admin');
+
         ?>
-        <div class="wrap">
-            <h1>Webhook Manager</h1>
-            <p>Manage and resend webhook data for Gravity Forms entries.</p>
-            <!-- TODO: Add entry list and bulk resend interface -->
+        <div class="wrap gf_browser_chrome">
+            <h1><?php echo esc_html__('Webhook Manager', 'gf-webhook-field-mapper'); ?></h1>
+
+            <div class="gform_wrapper">
+                <p><?php echo esc_html__('Manage and resend webhook data for Gravity Forms entries.', 'gf-webhook-field-mapper'); ?></p>
+
+                <div id="gform-settings-tabs">
+                    <h3>Entry List</h3>
+                    <p><em>Entry list and bulk resend interface coming soon...</em></p>
+                </div>
+            </div>
         </div>
         <?php
     }
