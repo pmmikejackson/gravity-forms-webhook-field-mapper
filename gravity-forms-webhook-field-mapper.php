@@ -391,16 +391,17 @@ class GF_Webhook_Field_Mapper {
     }
 
     /**
-     * Add admin menu
+     * Add admin menu - standalone top-level menu
      */
     public function add_admin_menu() {
-        add_submenu_page(
-            'gf_edit_forms',
-            'Webhook Manager',
-            'Webhook Manager',
-            'manage_options',
-            'gf-webhook-manager',
-            array($this, 'render_admin_page')
+        add_menu_page(
+            'Webhook Manager',                          // Page title
+            'Webhook Manager',                          // Menu title
+            'manage_options',                           // Capability
+            'gf-webhook-manager',                       // Menu slug
+            array($this, 'render_admin_page'),          // Callback
+            'dashicons-networking',                     // Icon
+            80                                          // Position (after Settings)
         );
     }
 
