@@ -605,8 +605,168 @@ class GF_Webhook_Field_Mapper {
      * Handle webhook resend request
      */
     private function handle_webhook_resend() {
-        // TODO: Implement webhook resend functionality
-        echo '<div class="notice notice-success"><p>Webhook resend functionality coming next...</p></div>';
+        // Get selected entries
+        $entry_ids = isset($_POST['entry_ids']) ? array_map('absint', $_POST['entry_ids']) : array();
+
+        if (empty($entry_ids)) {
+            echo '<div class="notice notice-error"><p>No entries selected.</p></div>';
+            return;
+        }
+
+        // Check resend mode
+        $resend_mode = isset($_POST['resend_mode']) ? sanitize_text_field($_POST['resend_mode']) : 'specific';
+
+        $success_count = 0;
+        $error_count = 0;
+
+        foreach ($entry_ids as $entry_id) {
+            $entry = GFAPI::get_entry($entry_id);
+            if (is_wp_error($entry)) {
+                $error_count++;
+                continue;
+            }
+
+            $form = GFAPI::get_form($entry['form_id']);
+            if (is_wp_error($form)) {
+                $error_count++;
+                continue;
+            }
+
+            // Determine which webhooks to send to
+            $webhooks = array();
+            if ($resend_mode === 'all_webhooks') {
+                // All Forms view - get all webhooks for this entry's form
+                $webhooks = $this->get_form_webhooks($entry['form_id']);
+            } else {
+                // Specific form view - use selected webhooks
+                $selected_webhook_ids = isset($_POST['webhook_ids']) ? array_map('absint', $_POST['webhook_ids']) : array();
+                if (!empty($selected_webhook_ids)) {
+                    $all_webhooks = $this->get_form_webhooks($entry['form_id']);
+                    foreach ($all_webhooks as $webhook) {
+                        if (in_array($webhook['id'], $selected_webhook_ids)) {
+                            $webhooks[] = $webhook;
+                        }
+                    }
+                }
+            }
+
+            if (empty($webhooks)) {
+                $error_count++;
+                continue;
+            }
+
+            // Send to each webhook
+            foreach ($webhooks as $webhook) {
+                $result = $this->send_webhook($entry, $form, $webhook);
+
+                if ($result['success']) {
+                    $success_count++;
+                } else {
+                    $error_count++;
+                }
+
+                // Log the attempt
+                $this->log_webhook_attempt($entry_id, $entry['form_id'], $webhook['id'], $webhook, $result);
+            }
+        }
+
+        // Display results
+        if ($success_count > 0) {
+            echo '<div class="notice notice-success"><p>';
+            echo sprintf('Successfully resent %d webhook(s).', $success_count);
+            echo '</p></div>';
+        }
+
+        if ($error_count > 0) {
+            echo '<div class="notice notice-error"><p>';
+            echo sprintf('Failed to resend %d webhook(s). Check the log for details.', $error_count);
+            echo '</p></div>';
+        }
+    }
+
+    /**
+     * Send webhook for an entry
+     *
+     * @param array $entry Entry data
+     * @param array $form Form object
+     * @param array $webhook Webhook feed configuration
+     * @return array Result with 'success', 'response_code', and 'message'
+     */
+    private function send_webhook($entry, $form, $webhook) {
+        // Get the webhook URL
+        $url = isset($webhook['meta']['requestURL']) ? $webhook['meta']['requestURL'] : '';
+
+        if (empty($url)) {
+            return array(
+                'success' => false,
+                'response_code' => 0,
+                'message' => 'No webhook URL configured'
+            );
+        }
+
+        // Map the entry data using our field mapper
+        $mapped_data = $this->modify_webhook_data(array(), array(), $entry, $form);
+
+        // Send the webhook using wp_remote_post
+        $response = wp_remote_post($url, array(
+            'method'      => 'POST',
+            'timeout'     => 45,
+            'redirection' => 5,
+            'httpversion' => '1.0',
+            'blocking'    => true,
+            'headers'     => array(
+                'Content-Type' => 'application/json',
+            ),
+            'body'        => wp_json_encode($mapped_data),
+            'cookies'     => array(),
+        ));
+
+        if (is_wp_error($response)) {
+            return array(
+                'success' => false,
+                'response_code' => 0,
+                'message' => $response->get_error_message()
+            );
+        }
+
+        $response_code = wp_remote_retrieve_response_code($response);
+        $response_body = wp_remote_retrieve_body($response);
+
+        return array(
+            'success' => ($response_code >= 200 && $response_code < 300),
+            'response_code' => $response_code,
+            'message' => $response_body
+        );
+    }
+
+    /**
+     * Log webhook attempt to database
+     *
+     * @param int $entry_id Entry ID
+     * @param int $form_id Form ID
+     * @param int $feed_id Webhook feed ID
+     * @param array $webhook Webhook configuration
+     * @param array $result Result from send_webhook
+     */
+    private function log_webhook_attempt($entry_id, $form_id, $feed_id, $webhook, $result) {
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'gf_webhook_log';
+
+        $wpdb->insert(
+            $table_name,
+            array(
+                'entry_id' => $entry_id,
+                'form_id' => $form_id,
+                'feed_id' => $feed_id,
+                'webhook_name' => isset($webhook['meta']['feedName']) ? $webhook['meta']['feedName'] : '',
+                'webhook_url' => isset($webhook['meta']['requestURL']) ? $webhook['meta']['requestURL'] : '',
+                'status' => $result['success'] ? 'success' : 'failed',
+                'response_code' => $result['response_code'],
+                'response_message' => substr($result['message'], 0, 1000), // Limit message length
+                'created_at' => current_time('mysql')
+            ),
+            array('%d', '%d', '%d', '%s', '%s', '%s', '%d', '%s', '%s')
+        );
     }
 
     /**
