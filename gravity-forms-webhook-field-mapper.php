@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name: Gravity Forms Webhook Field Mapper [DEV]
+ * Plugin Name: Gravity Forms Webhook Field Mapper
  * Plugin URI: https://github.com/mjhome/gravity-forms-webhook-field-mapper
- * Description: Maps Gravity Forms field IDs to field names in webhook data - DEVELOPMENT VERSION
- * Version: 1.3.0-dev
+ * Description: Maps Gravity Forms field IDs to field names in webhook data
+ * Version: 1.3.0
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
