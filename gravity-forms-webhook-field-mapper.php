@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name: Gravity Forms Webhook Field Mapper
+ * Plugin Name: Gravity Forms Webhook Field Mapper [DEV]
  * Plugin URI: https://github.com/mjhome/gravity-forms-webhook-field-mapper
- * Description: Maps Gravity Forms field IDs to field names in webhook data
- * Version: 1.2.1
+ * Description: Maps Gravity Forms field IDs to field names in webhook data - DEVELOPMENT VERSION
+ * Version: 1.3.0-dev
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
@@ -27,8 +27,8 @@ class GF_Webhook_Field_Mapper {
     public function __construct() {
         add_action('init', array($this, 'init'));
 
-        // Admin menu
-        add_action('admin_menu', array($this, 'add_admin_menu'));
+        // Admin menu - use priority 100 to add after other Gravity Forms menus
+        add_action('admin_menu', array($this, 'add_admin_menu'), 100);
 
         // Add metabox to entry detail page
         add_action('gform_entry_detail_sidebar_middle', array($this, 'add_resend_metabox'), 10, 2);
@@ -394,15 +394,19 @@ class GF_Webhook_Field_Mapper {
      * Add admin menu
      */
     public function add_admin_menu() {
-        // Use Gravity Forms toolbar menu with lower position number for bottom placement
+        // Check if Gravity Forms is active before adding menu
+        if (!class_exists('GFForms')) {
+            return;
+        }
+
+        // Add submenu page under Gravity Forms
         add_submenu_page(
             'gf_edit_forms',                    // Parent slug
-            'Webhook Manager',                   // Page title
-            'Webhook Manager',                   // Menu title
-            'gform_full_access',                 // Capability (Gravity Forms specific)
+            __('Webhook Manager', 'gf-webhook-field-mapper'), // Page title
+            __('Webhook Manager', 'gf-webhook-field-mapper'), // Menu title
+            'gravityforms_edit_forms',          // Capability
             'gf-webhook-manager',                // Menu slug
-            array($this, 'render_admin_page'),   // Callback
-            100                                   // Position (higher = lower in menu)
+            array($this, 'render_admin_page')    // Callback
         );
     }
 
@@ -411,24 +415,18 @@ class GF_Webhook_Field_Mapper {
      */
     public function render_admin_page() {
         // Check user capabilities
-        if (!current_user_can('gform_full_access') && !current_user_can('manage_options')) {
-            wp_die(__('You do not have sufficient permissions to access this page.'));
+        if (!current_user_can('gravityforms_edit_forms')) {
+            wp_die(esc_html__('You do not have sufficient permissions to access this page.', 'gf-webhook-field-mapper'));
         }
 
-        // Enqueue Gravity Forms admin styles for consistency
-        wp_enqueue_style('gform_admin');
-
         ?>
-        <div class="wrap gf_browser_chrome">
+        <div class="wrap">
             <h1><?php echo esc_html__('Webhook Manager', 'gf-webhook-field-mapper'); ?></h1>
+            <p><?php echo esc_html__('Manage and resend webhook data for Gravity Forms entries.', 'gf-webhook-field-mapper'); ?></p>
 
-            <div class="gform_wrapper">
-                <p><?php echo esc_html__('Manage and resend webhook data for Gravity Forms entries.', 'gf-webhook-field-mapper'); ?></p>
-
-                <div id="gform-settings-tabs">
-                    <h3>Entry List</h3>
-                    <p><em>Entry list and bulk resend interface coming soon...</em></p>
-                </div>
+            <div class="gf_settings_container">
+                <h3><?php echo esc_html__('Entry List', 'gf-webhook-field-mapper'); ?></h3>
+                <p><em><?php echo esc_html__('Entry list and bulk resend interface coming soon...', 'gf-webhook-field-mapper'); ?></em></p>
             </div>
         </div>
         <?php
