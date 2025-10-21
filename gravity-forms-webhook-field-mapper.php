@@ -477,6 +477,7 @@ class GF_Webhook_Field_Mapper {
                             <tr>
                                 <th class="check-column"><input type="checkbox" id="select-all" /></th>
                                 <th>Entry ID</th>
+                                <th>Company Name</th>
                                 <th>Form</th>
                                 <th>Date</th>
                                 <th>Status</th>
@@ -485,12 +486,14 @@ class GF_Webhook_Field_Mapper {
                         <tbody>
                             <?php foreach ($entries as $entry):
                                 $form = GFAPI::get_form($entry['form_id']);
+                                $company_name = $this->get_company_name_from_entry($entry, $form);
                             ?>
                                 <tr>
                                     <th class="check-column">
                                         <input type="checkbox" name="entry_ids[]" value="<?php echo esc_attr($entry['id']); ?>" />
                                     </th>
                                     <td><?php echo esc_html($entry['id']); ?></td>
+                                    <td><?php echo esc_html($company_name); ?></td>
                                     <td><?php echo esc_html($form['title']); ?></td>
                                     <td><?php echo esc_html($entry['date_created']); ?></td>
                                     <td><?php echo esc_html($entry['status']); ?></td>
@@ -534,6 +537,40 @@ class GF_Webhook_Field_Mapper {
             <?php endif; ?>
         </div>
         <?php
+    }
+
+    /**
+     * Get company name from entry
+     *
+     * @param array $entry The entry data
+     * @param array $form The form object
+     * @return string Company name or empty string
+     */
+    private function get_company_name_from_entry($entry, $form) {
+        // Look for common company name field labels/admin labels
+        $company_field_labels = array('company_name', 'company', 'business_name', 'organization');
+
+        foreach ($form['fields'] as $field) {
+            // Check admin label first
+            $field_key = '';
+            if (!empty($field->adminLabel)) {
+                $field_key = strtolower(str_replace(' ', '_', $field->adminLabel));
+            } elseif (!empty($field->label)) {
+                $field_key = strtolower(str_replace(' ', '_', $field->label));
+            }
+
+            // Check if this field matches a company name pattern
+            foreach ($company_field_labels as $company_label) {
+                if (strpos($field_key, $company_label) !== false) {
+                    $value = isset($entry[$field->id]) ? $entry[$field->id] : '';
+                    if (!empty($value)) {
+                        return $value;
+                    }
+                }
+            }
+        }
+
+        return '(No Company Name)';
     }
 
     /**
