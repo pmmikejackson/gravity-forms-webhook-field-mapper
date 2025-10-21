@@ -153,8 +153,13 @@ class GF_Webhook_Field_Mapper {
                     }
                 }
 
-                // Always include the field, even if no checkboxes selected
-                $mapped_data[$field_label] = $checkbox_values;
+                // Convert to comma-separated string for specific fields (174 = Training, 175 = Pre-Employment)
+                if (in_array($field_id, array(174, 175))) {
+                    $mapped_data[$field_label] = !empty($checkbox_values) ? implode(', ', $checkbox_values) : '';
+                } else {
+                    // Always include the field, even if no checkboxes selected
+                    $mapped_data[$field_label] = $checkbox_values;
+                }
 
             } elseif ($field->type == 'list') {
                 // Handle list fields
@@ -171,7 +176,8 @@ class GF_Webhook_Field_Mapper {
                 $value = isset($entry[$field_id]) ? $entry[$field_id] : '';
 
                 // Handle fields with multiple inputs
-                if (!is_array($field->inputs)) {
+                if (!is_array($field->inputs) || empty($field->inputs)) {
+                    // Simple field with no inputs - use the main field value
                     $mapped_data[$field_label] = $value;
                 } else {
                     // For fields with inputs (like email with confirmation, date fields, time fields)
@@ -196,7 +202,65 @@ class GF_Webhook_Field_Mapper {
                         // For multi-input fields, include all sub-fields
                         $mapped_data[$field_label] = $input_values;
                     }
+
+                    // If we still don't have a value but the main field has data, use that
+                    if ((!isset($mapped_data[$field_label]) || $mapped_data[$field_label] === '') && $value !== '') {
+                        $mapped_data[$field_label] = $value;
+                    }
                 }
+            }
+        }
+
+        // Process any remaining entry fields that weren't in $form['fields']
+        // This catches edge cases like hidden fields, special fields, etc.
+        $processed_field_ids = array();
+        foreach ($form['fields'] as $field) {
+            $processed_field_ids[] = (string)$field->id;
+        }
+
+        // Standard entry metadata fields to skip
+        $metadata_fields = array('id', 'form_id', 'post_id', 'date_created', 'date_updated', 'is_starred',
+                                 'is_read', 'ip', 'source_url', 'user_agent', 'currency', 'payment_status',
+                                 'payment_date', 'payment_amount', 'payment_method', 'transaction_id',
+                                 'is_fulfilled', 'created_by', 'transaction_type', 'status', 'source_id');
+
+        foreach ($entry as $key => $value) {
+            // Skip metadata fields
+            if (in_array($key, $metadata_fields)) {
+                continue;
+            }
+
+            // Skip if this field was already processed
+            $base_field_id = strpos($key, '.') !== false ? substr($key, 0, strpos($key, '.')) : $key;
+            if (in_array($base_field_id, $processed_field_ids)) {
+                continue;
+            }
+
+            // Skip sub-fields (they would have been handled by their parent field)
+            if (strpos($key, '.') !== false) {
+                continue;
+            }
+
+            // Skip if not a numeric field ID
+            if (!is_numeric($key)) {
+                continue;
+            }
+
+            // This is an unprocessed field - try to find it in the form or create a generic mapping
+            $field_found = false;
+            foreach ($form['fields'] as $field) {
+                if ($field->id == $key) {
+                    $field_found = true;
+                    break;
+                }
+            }
+
+            if (!$field_found) {
+                // Field not found in form structure, but exists in entry
+                // Map it with a generic name based on field ID
+                $field_label = 'field_' . $key;
+                $mapped_data[$field_label] = $value;
+                $processed_field_ids[] = (string)$key;
             }
         }
 
