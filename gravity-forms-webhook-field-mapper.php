@@ -26,6 +26,12 @@ class GF_Webhook_Field_Mapper {
      */
     public function __construct() {
         add_action('init', array($this, 'init'));
+
+        // Admin menu
+        add_action('admin_menu', array($this, 'add_admin_menu'));
+
+        // Add metabox to entry detail page
+        add_action('gform_entry_detail_sidebar_middle', array($this, 'add_resend_metabox'), 10, 2);
     }
 
     /**
@@ -354,7 +360,91 @@ class GF_Webhook_Field_Mapper {
 
         return $label;
     }
+
+    /**
+     * Create webhook log table on plugin activation
+     */
+    public function create_webhook_log_table() {
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'gf_webhook_log';
+        $charset_collate = $wpdb->get_charset_collate();
+
+        $sql = "CREATE TABLE IF NOT EXISTS $table_name (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            entry_id bigint(20) NOT NULL,
+            form_id bigint(20) NOT NULL,
+            feed_id bigint(20) NOT NULL,
+            webhook_name varchar(255) DEFAULT NULL,
+            webhook_url text DEFAULT NULL,
+            status varchar(20) NOT NULL,
+            response_code int(11) DEFAULT NULL,
+            response_message text DEFAULT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY  (id),
+            KEY entry_id (entry_id),
+            KEY form_id (form_id),
+            KEY status (status)
+        ) $charset_collate;";
+
+        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+        dbDelta($sql);
+    }
+
+    /**
+     * Add admin menu
+     */
+    public function add_admin_menu() {
+        add_submenu_page(
+            'gf_edit_forms',
+            'Webhook Manager',
+            'Webhook Manager',
+            'manage_options',
+            'gf-webhook-manager',
+            array($this, 'render_admin_page')
+        );
+    }
+
+    /**
+     * Render admin page
+     */
+    public function render_admin_page() {
+        // Check user capabilities
+        if (!current_user_can('manage_options')) {
+            wp_die(__('You do not have sufficient permissions to access this page.'));
+        }
+
+        ?>
+        <div class="wrap">
+            <h1>Webhook Manager</h1>
+            <p>Manage and resend webhook data for Gravity Forms entries.</p>
+            <!-- TODO: Add entry list and bulk resend interface -->
+        </div>
+        <?php
+    }
+
+    /**
+     * Add resend metabox to entry detail page
+     *
+     * @param array $form The form object
+     * @param array $entry The entry object
+     *
+     * @noinspection PhpUnusedParameterInspection
+     */
+    public function add_resend_metabox($form, $entry) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter
+        ?>
+        <div class="postbox">
+            <h3><span>Resend to Webhook</span></h3>
+            <div class="inside">
+                <p>Select webhook(s) to resend this entry data:</p>
+                <!-- TODO: Add webhook selection checkboxes and resend button -->
+            </div>
+        </div>
+        <?php
+    }
 }
 
 // Initialize the plugin
-new GF_Webhook_Field_Mapper();
+$gf_webhook_mapper = new GF_Webhook_Field_Mapper();
+
+// Register activation hook
+register_activation_hook(__FILE__, array($gf_webhook_mapper, 'create_webhook_log_table'));
