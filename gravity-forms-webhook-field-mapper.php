@@ -70,6 +70,11 @@ class GF_Webhook_Field_Mapper {
             $field_id = $field->id;
             $field_label = $this->get_field_label($field);
 
+            // Ensure unique field labels - if this label already exists, append the field ID
+            if (isset($mapped_data[$field_label])) {
+                $field_label = $field_label . '_' . $field_id;
+            }
+
             // Handle different field types with special sub-field structures
             if ($field->type == 'name') {
                 // Handle name fields with sub-fields
@@ -209,6 +214,31 @@ class GF_Webhook_Field_Mapper {
                     }
                 }
             }
+
+            // Safety net: ensure this field was mapped, even if empty
+            // This catches any field types that might have been missed by the handlers above
+            if (!isset($mapped_data[$field_label])) {
+                // Try to get the value from the entry
+                $field_value = '';
+
+                // First, try the direct field ID
+                if (isset($entry[$field_id]) && $entry[$field_id] !== '') {
+                    $field_value = $entry[$field_id];
+                }
+                // If empty, check if this field has inputs and try to get the first input value
+                elseif (is_array($field->inputs) && !empty($field->inputs)) {
+                    // Try each input to find a value
+                    foreach ($field->inputs as $input) {
+                        $input_id = $input['id'];
+                        if (isset($entry[$input_id]) && $entry[$input_id] !== '') {
+                            $field_value = $entry[$input_id];
+                            break; // Use the first non-empty input value
+                        }
+                    }
+                }
+
+                $mapped_data[$field_label] = $field_value;
+            }
         }
 
         // Process any remaining entry fields that weren't in $form['fields']
@@ -284,17 +314,17 @@ class GF_Webhook_Field_Mapper {
      * @return string The field label
      */
     private function get_field_label($field) {
-        // Use field label if available
-        if (!empty($field->label)) {
-            return $this->sanitize_label($field->label);
-        }
-
-        // Fall back to admin label
+        // Prefer admin label if set (allows for custom unique identifiers)
         if (!empty($field->adminLabel)) {
             return $this->sanitize_label($field->adminLabel);
         }
 
-        // Fall back to field type with ID
+        // Fall back to field label
+        if (!empty($field->label)) {
+            return $this->sanitize_label($field->label);
+        }
+
+        // Last resort: field type with ID
         return $field->type . '_' . $field->id;
     }
 
