@@ -503,7 +503,7 @@ class GF_Webhook_Field_Mapper {
                     </table>
 
                     <?php if ($selected_form_id > 0):
-                        // Get webhooks for this form
+                        // Specific form selected - show webhooks for that form
                         $webhooks = $this->get_form_webhooks($selected_form_id);
                         if (!empty($webhooks)): ?>
                             <h3>Select Webhook(s) to Resend:</h3>
@@ -523,6 +523,23 @@ class GF_Webhook_Field_Mapper {
                         <?php else: ?>
                             <p><em>No webhooks configured for this form.</em></p>
                         <?php endif; ?>
+                    <?php else: ?>
+                        <!-- All Forms view - resend to each entry's form webhooks -->
+                        <h3>Resend Options:</h3>
+                        <p>
+                            <label>
+                                <input type="radio" name="resend_mode" value="all_webhooks" checked />
+                                Resend to ALL webhooks configured for each entry's form
+                            </label>
+                        </p>
+                        <p>
+                            <button type="submit" name="resend_webhook_submit" class="button button-primary">
+                                Resend Selected Entries to Their Form Webhooks
+                            </button>
+                        </p>
+                        <p class="description">
+                            Each selected entry will be resent to all webhooks configured for its respective form.
+                        </p>
                     <?php endif; ?>
                 </form>
 
