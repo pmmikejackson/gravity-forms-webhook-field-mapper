@@ -409,13 +409,150 @@ class GF_Webhook_Field_Mapper {
      * Render admin page
      */
     public function render_admin_page() {
+        // Handle form submission for resending webhooks
+        if (isset($_POST['resend_webhook_submit']) && check_admin_referer('resend_webhook_action', 'resend_webhook_nonce')) {
+            $this->handle_webhook_resend();
+        }
+
         ?>
         <div class="wrap">
             <h1>Webhook Manager</h1>
-            <p>Manage and resend webhook data for Gravity Forms entries.</p>
-            <p><strong>Admin page is working!</strong></p>
+
+            <?php $this->render_entry_list(); ?>
         </div>
         <?php
+    }
+
+    /**
+     * Render entry list table
+     */
+    private function render_entry_list() {
+        // Get all forms
+        $forms = GFAPI::get_forms();
+
+        // Get selected form ID from query string
+        $selected_form_id = isset($_GET['form_id']) ? absint($_GET['form_id']) : 0;
+
+        ?>
+        <div class="gf-webhook-manager">
+            <h2>Form Entries</h2>
+
+            <!-- Form Filter -->
+            <form method="get" action="">
+                <input type="hidden" name="page" value="gf-webhook-manager" />
+                <label for="form_id">Select Form:</label>
+                <select name="form_id" id="form_id" onchange="this.form.submit()">
+                    <option value="0">-- All Forms --</option>
+                    <?php foreach ($forms as $form): ?>
+                        <option value="<?php echo esc_attr($form['id']); ?>" <?php selected($selected_form_id, $form['id']); ?>>
+                            <?php echo esc_html($form['title']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </form>
+
+            <?php
+            // Get entries for selected form or all forms
+            $search_criteria = array();
+            if ($selected_form_id > 0) {
+                $entries = GFAPI::get_entries($selected_form_id);
+                $current_form = GFAPI::get_form($selected_form_id);
+            } else {
+                // Get entries from all forms
+                $entries = array();
+                foreach ($forms as $form) {
+                    $form_entries = GFAPI::get_entries($form['id']);
+                    $entries = array_merge($entries, $form_entries);
+                }
+            }
+
+            if (empty($entries)): ?>
+                <p><em>No entries found.</em></p>
+            <?php else: ?>
+                <form method="post" action="">
+                    <?php wp_nonce_field('resend_webhook_action', 'resend_webhook_nonce'); ?>
+
+                    <table class="wp-list-table widefat fixed striped">
+                        <thead>
+                            <tr>
+                                <th class="check-column"><input type="checkbox" id="select-all" /></th>
+                                <th>Entry ID</th>
+                                <th>Form</th>
+                                <th>Date</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($entries as $entry):
+                                $form = GFAPI::get_form($entry['form_id']);
+                            ?>
+                                <tr>
+                                    <th class="check-column">
+                                        <input type="checkbox" name="entry_ids[]" value="<?php echo esc_attr($entry['id']); ?>" />
+                                    </th>
+                                    <td><?php echo esc_html($entry['id']); ?></td>
+                                    <td><?php echo esc_html($form['title']); ?></td>
+                                    <td><?php echo esc_html($entry['date_created']); ?></td>
+                                    <td><?php echo esc_html($entry['status']); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+
+                    <?php if ($selected_form_id > 0):
+                        // Get webhooks for this form
+                        $webhooks = $this->get_form_webhooks($selected_form_id);
+                        if (!empty($webhooks)): ?>
+                            <h3>Select Webhook(s) to Resend:</h3>
+                            <?php foreach ($webhooks as $webhook): ?>
+                                <label>
+                                    <input type="checkbox" name="webhook_ids[]" value="<?php echo esc_attr($webhook['id']); ?>" />
+                                    <?php echo esc_html($webhook['meta']['feedName']); ?>
+                                    (<?php echo esc_html($webhook['meta']['requestURL']); ?>)
+                                </label><br/>
+                            <?php endforeach; ?>
+
+                            <p>
+                                <button type="submit" name="resend_webhook_submit" class="button button-primary">
+                                    Resend Selected Entries
+                                </button>
+                            </p>
+                        <?php else: ?>
+                            <p><em>No webhooks configured for this form.</em></p>
+                        <?php endif; ?>
+                    <?php endif; ?>
+                </form>
+
+                <script>
+                document.getElementById('select-all').addEventListener('change', function() {
+                    var checkboxes = document.querySelectorAll('input[name="entry_ids[]"]');
+                    checkboxes.forEach(function(checkbox) {
+                        checkbox.checked = document.getElementById('select-all').checked;
+                    });
+                });
+                </script>
+            <?php endif; ?>
+        </div>
+        <?php
+    }
+
+    /**
+     * Get webhooks configured for a form
+     *
+     * @param int $form_id Form ID
+     * @return array Array of webhook feeds
+     */
+    private function get_form_webhooks($form_id) {
+        $feeds = GFAPI::get_feeds(null, $form_id, 'gravityformswebhooks');
+        return $feeds ? $feeds : array();
+    }
+
+    /**
+     * Handle webhook resend request
+     */
+    private function handle_webhook_resend() {
+        // TODO: Implement webhook resend functionality
+        echo '<div class="notice notice-success"><p>Webhook resend functionality coming next...</p></div>';
     }
 
     /**
