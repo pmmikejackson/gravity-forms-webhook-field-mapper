@@ -414,11 +414,29 @@ class GF_Webhook_Field_Mapper {
             $this->handle_webhook_resend();
         }
 
+        // Determine which tab to show
+        $active_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'entries';
+
         ?>
         <div class="wrap">
             <h1>Webhook Manager</h1>
 
-            <?php $this->render_entry_list(); ?>
+            <h2 class="nav-tab-wrapper">
+                <a href="?page=gf-webhook-manager&tab=entries" class="nav-tab <?php echo $active_tab === 'entries' ? 'nav-tab-active' : ''; ?>">
+                    Resend Entries
+                </a>
+                <a href="?page=gf-webhook-manager&tab=logs" class="nav-tab <?php echo $active_tab === 'logs' ? 'nav-tab-active' : ''; ?>">
+                    Webhook Log
+                </a>
+            </h2>
+
+            <?php
+            if ($active_tab === 'logs') {
+                $this->render_log_viewer();
+            } else {
+                $this->render_entry_list();
+            }
+            ?>
         </div>
         <?php
     }
@@ -551,6 +569,171 @@ class GF_Webhook_Field_Mapper {
                     });
                 });
                 </script>
+            <?php endif; ?>
+        </div>
+        <?php
+    }
+
+    /**
+     * Render log viewer
+     */
+    private function render_log_viewer() {
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'gf_webhook_log';
+
+        // Get filter parameters
+        $filter_status = isset($_GET['status']) ? sanitize_text_field($_GET['status']) : '';
+        $filter_form_id = isset($_GET['filter_form_id']) ? absint($_GET['filter_form_id']) : 0;
+        $search = isset($_GET['s']) ? sanitize_text_field($_GET['s']) : '';
+
+        // Build query
+        $where_clauses = array();
+        $query_params = array();
+
+        if (!empty($filter_status)) {
+            $where_clauses[] = "status = %s";
+            $query_params[] = $filter_status;
+        }
+
+        if ($filter_form_id > 0) {
+            $where_clauses[] = "form_id = %d";
+            $query_params[] = $filter_form_id;
+        }
+
+        if (!empty($search)) {
+            $where_clauses[] = "(webhook_name LIKE %s OR webhook_url LIKE %s OR entry_id = %d)";
+            $query_params[] = '%' . $wpdb->esc_like($search) . '%';
+            $query_params[] = '%' . $wpdb->esc_like($search) . '%';
+            $query_params[] = absint($search);
+        }
+
+        $where_sql = '';
+        if (!empty($where_clauses)) {
+            $where_sql = 'WHERE ' . implode(' AND ', $where_clauses);
+        }
+
+        // Get total count
+        $total_query = "SELECT COUNT(*) FROM $table_name $where_sql";
+        if (!empty($query_params)) {
+            $total_count = $wpdb->get_var($wpdb->prepare($total_query, $query_params));
+        } else {
+            $total_count = $wpdb->get_var($total_query);
+        }
+
+        // Pagination
+        $per_page = 50;
+        $current_page = isset($_GET['paged']) ? absint($_GET['paged']) : 1;
+        $offset = ($current_page - 1) * $per_page;
+        $total_pages = ceil($total_count / $per_page);
+
+        // Get logs
+        $logs_query = "SELECT * FROM $table_name $where_sql ORDER BY created_at DESC LIMIT %d OFFSET %d";
+        $final_params = array_merge($query_params, array($per_page, $offset));
+        $logs = $wpdb->get_results($wpdb->prepare($logs_query, $final_params));
+
+        // Get all forms for filter
+        $forms = GFAPI::get_forms();
+
+        ?>
+        <div class="gf-webhook-log-viewer">
+            <h2>Webhook Log</h2>
+
+            <!-- Filters -->
+            <div class="tablenav top">
+                <div class="alignleft actions">
+                    <form method="get" action="">
+                        <input type="hidden" name="page" value="gf-webhook-manager" />
+                        <input type="hidden" name="tab" value="logs" />
+
+                        <select name="status">
+                            <option value="">All Statuses</option>
+                            <option value="success" <?php selected($filter_status, 'success'); ?>>Success</option>
+                            <option value="failed" <?php selected($filter_status, 'failed'); ?>>Failed</option>
+                        </select>
+
+                        <select name="filter_form_id">
+                            <option value="0">All Forms</option>
+                            <?php foreach ($forms as $form): ?>
+                                <option value="<?php echo esc_attr($form['id']); ?>" <?php selected($filter_form_id, $form['id']); ?>>
+                                    <?php echo esc_html($form['title']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+
+                        <input type="search" name="s" value="<?php echo esc_attr($search); ?>" placeholder="Search entry ID, webhook name, or URL..." style="width: 300px;" />
+
+                        <button type="submit" class="button">Filter</button>
+                        <a href="?page=gf-webhook-manager&tab=logs" class="button">Reset</a>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Log Table -->
+            <?php if (empty($logs)): ?>
+                <p><em>No log entries found.</em></p>
+            <?php else: ?>
+                <table class="wp-list-table widefat fixed striped">
+                    <thead>
+                        <tr>
+                            <th>Date/Time</th>
+                            <th>Entry ID</th>
+                            <th>Form</th>
+                            <th>Webhook</th>
+                            <th>URL</th>
+                            <th>Status</th>
+                            <th>Response</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($logs as $log):
+                            $form = GFAPI::get_form($log->form_id);
+                            $form_title = $form ? $form['title'] : 'Unknown Form';
+                        ?>
+                            <tr>
+                                <td><?php echo esc_html($log->created_at); ?></td>
+                                <td>
+                                    <a href="<?php echo admin_url('admin.php?page=gf_entries&view=entry&id=' . $log->form_id . '&lid=' . $log->entry_id); ?>">
+                                        #<?php echo esc_html($log->entry_id); ?>
+                                    </a>
+                                </td>
+                                <td><?php echo esc_html($form_title); ?></td>
+                                <td><?php echo esc_html($log->webhook_name); ?></td>
+                                <td><small><?php echo esc_html($log->webhook_url); ?></small></td>
+                                <td>
+                                    <span style="color: <?php echo $log->status === 'success' ? 'green' : 'red'; ?>; font-weight: bold;">
+                                        <?php echo esc_html(ucfirst($log->status)); ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <?php echo esc_html($log->response_code); ?>
+                                    <?php if (!empty($log->response_message)): ?>
+                                        <br/><small><?php echo esc_html(substr($log->response_message, 0, 100)); ?></small>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+
+                <!-- Pagination -->
+                <?php if ($total_pages > 1): ?>
+                    <div class="tablenav bottom">
+                        <div class="tablenav-pages">
+                            <span class="displaying-num"><?php echo number_format($total_count); ?> items</span>
+                            <?php
+                            $page_links = paginate_links(array(
+                                'base' => add_query_arg('paged', '%#%'),
+                                'format' => '',
+                                'prev_text' => '&laquo;',
+                                'next_text' => '&raquo;',
+                                'total' => $total_pages,
+                                'current' => $current_page
+                            ));
+                            echo $page_links;
+                            ?>
+                        </div>
+                    </div>
+                <?php endif; ?>
             <?php endif; ?>
         </div>
         <?php
@@ -778,15 +961,120 @@ class GF_Webhook_Field_Mapper {
      * @noinspection PhpUnusedParameterInspection
      */
     public function add_resend_metabox($form, $entry) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter
+        // Handle resend submission
+        if (isset($_POST['gf_resend_webhook_submit']) && check_admin_referer('gf_resend_webhook_' . $entry['id'], 'gf_resend_webhook_nonce')) {
+            $this->handle_single_entry_resend($entry, $form);
+        }
+
+        // Get webhooks for this form
+        $webhooks = $this->get_form_webhooks($form['id']);
+
+        // Get recent log entries for this entry
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'gf_webhook_log';
+        $recent_logs = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM $table_name WHERE entry_id = %d ORDER BY created_at DESC LIMIT 5",
+            $entry['id']
+        ));
+
         ?>
         <div class="postbox">
             <h3><span>Resend to Webhook</span></h3>
             <div class="inside">
-                <p>Select webhook(s) to resend this entry data:</p>
-                <!-- TODO: Add webhook selection checkboxes and resend button -->
+                <?php if (!empty($webhooks)): ?>
+                    <form method="post" action="">
+                        <?php wp_nonce_field('gf_resend_webhook_' . $entry['id'], 'gf_resend_webhook_nonce'); ?>
+
+                        <p><strong>Select webhook(s) to resend:</strong></p>
+                        <?php foreach ($webhooks as $webhook): ?>
+                            <label style="display: block; margin-bottom: 5px;">
+                                <input type="checkbox" name="webhook_ids[]" value="<?php echo esc_attr($webhook['id']); ?>" />
+                                <?php echo esc_html($webhook['meta']['feedName']); ?>
+                                <br/><small style="margin-left: 20px;"><?php echo esc_html($webhook['meta']['requestURL']); ?></small>
+                            </label>
+                        <?php endforeach; ?>
+
+                        <p style="margin-top: 15px;">
+                            <button type="submit" name="gf_resend_webhook_submit" class="button button-primary">
+                                Resend to Selected Webhooks
+                            </button>
+                        </p>
+                    </form>
+
+                    <?php if (!empty($recent_logs)): ?>
+                        <hr style="margin: 15px 0;" />
+                        <p><strong>Recent Webhook History:</strong></p>
+                        <table class="widefat" style="margin-top: 10px;">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Webhook</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($recent_logs as $log): ?>
+                                    <tr>
+                                        <td><?php echo esc_html($log->created_at); ?></td>
+                                        <td><?php echo esc_html($log->webhook_name); ?></td>
+                                        <td>
+                                            <span class="<?php echo $log->status === 'success' ? 'gf-icon-check' : 'gf-icon-close'; ?>" style="color: <?php echo $log->status === 'success' ? 'green' : 'red'; ?>;">
+                                                <?php echo esc_html(ucfirst($log->status)); ?>
+                                                (<?php echo esc_html($log->response_code); ?>)
+                                            </span>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    <?php endif; ?>
+                <?php else: ?>
+                    <p><em>No webhooks configured for this form.</em></p>
+                <?php endif; ?>
             </div>
         </div>
         <?php
+    }
+
+    /**
+     * Handle single entry resend from detail page
+     *
+     * @param array $entry Entry data
+     * @param array $form Form object
+     */
+    private function handle_single_entry_resend($entry, $form) {
+        $webhook_ids = isset($_POST['webhook_ids']) ? array_map('absint', $_POST['webhook_ids']) : array();
+
+        if (empty($webhook_ids)) {
+            echo '<div class="notice notice-error"><p>Please select at least one webhook.</p></div>';
+            return;
+        }
+
+        $webhooks = $this->get_form_webhooks($form['id']);
+        $success_count = 0;
+        $error_count = 0;
+
+        foreach ($webhooks as $webhook) {
+            if (in_array($webhook['id'], $webhook_ids)) {
+                $result = $this->send_webhook($entry, $form, $webhook);
+
+                if ($result['success']) {
+                    $success_count++;
+                } else {
+                    $error_count++;
+                }
+
+                $this->log_webhook_attempt($entry['id'], $form['id'], $webhook['id'], $webhook, $result);
+            }
+        }
+
+        if ($success_count > 0) {
+            echo '<div class="notice notice-success"><p>Successfully resent to ' . $success_count . ' webhook(s).</p></div>';
+        }
+
+        if ($error_count > 0) {
+            echo '<div class="notice notice-error"><p>Failed to resend to ' . $error_count . ' webhook(s).</p></div>';
+        }
     }
 }
 
