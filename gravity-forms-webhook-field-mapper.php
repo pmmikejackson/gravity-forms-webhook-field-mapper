@@ -3,7 +3,7 @@
  * Plugin Name: Gravity Forms Webhook Field Mapper
  * Plugin URI: https://github.com/mjhome/gravity-forms-webhook-field-mapper
  * Description: Maps Gravity Forms field IDs to field names in webhook data
- * Version: 1.4.0-dev.2
+ * Version: 1.4.0-dev.3
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
@@ -118,10 +118,27 @@ class GF_Webhook_Field_Mapper {
      * @param array $form The form object
      */
     public function log_form_submission($entry, $form) {
+        // Get webhook feeds for this form
+        $feeds = GFAPI::get_feeds(null, $form['id'], 'gravityformswebhooks');
+
+        $feed_info = array();
+        if (is_array($feeds)) {
+            foreach ($feeds as $feed) {
+                $feed_info[] = array(
+                    'id' => $feed['id'],
+                    'name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unnamed',
+                    'is_active' => $feed['is_active'],
+                    'event' => isset($feed['meta']['event']) ? $feed['meta']['event'] : 'not set',
+                );
+            }
+        }
+
         $this->log_debug('Form submitted - webhooks should fire now', array(
             'form_id' => $form['id'],
             'form_title' => $form['title'],
-            'entry_id' => $entry['id']
+            'entry_id' => $entry['id'],
+            'webhook_feeds_found' => count($feeds),
+            'feeds' => $feed_info
         ));
     }
 
