@@ -1,5 +1,41 @@
 # Changelog - v1.4.0 Development
 
+## v1.4.0-dev.6 (2025-10-23)
+
+### Added
+- Enhanced diagnostic logging for field mapping transformation
+- BEFORE transformation logging showing original entry data structure
+- AFTER transformation logging showing mapped webhook payload
+- Full webhook payload logging for complete inspection
+- Manual resend path logging with detailed step tracking
+- HTTP response logging with status codes and body preview
+
+### Changed
+- Improved visibility into field mapping process
+- Added comprehensive logging to `modify_webhook_data()` method
+- Added detailed logging to `send_webhook()` method for manual resends
+- Better error tracking for webhook send failures
+
+### Testing
+- Enable `WP_DEBUG` and `WP_DEBUG_LOG` in wp-config.php
+- Perform manual resend from Webhook Manager
+- Check wp-content/debug.log for transformation details
+- Look for these log markers:
+  - `MANUAL RESEND - Starting webhook send`
+  - `BEFORE TRANSFORMATION - Original entry data`
+  - `AFTER TRANSFORMATION - Mapped webhook data`
+  - `FULL WEBHOOK PAYLOAD`
+  - `MANUAL RESEND - Webhook response received`
+
+### Purpose
+This release adds extensive diagnostic logging to help verify:
+1. That field IDs are being replaced with admin labels/field names
+2. What data structure is sent to Momentum
+3. Which fields are included/excluded based on configuration
+4. HTTP response details from webhook endpoint
+
+---
+
 ## v1.4.0-dev.2 (2025-10-23)
 
 ### Fixed

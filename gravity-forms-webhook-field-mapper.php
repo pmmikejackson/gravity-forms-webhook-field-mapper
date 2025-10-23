@@ -3,7 +3,7 @@
  * Plugin Name: Gravity Forms Webhook Field Mapper
  * Plugin URI: https://github.com/mjhome/gravity-forms-webhook-field-mapper
  * Description: Maps Gravity Forms field IDs to field names in webhook data
- * Version: 1.4.0-dev.5
+ * Version: 1.4.0-dev.6
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
@@ -228,6 +228,12 @@ class GF_Webhook_Field_Mapper {
             'entry_id' => $entry['id'],
             'filter_mode' => $this->field_config['mode'],
             'include_empty' => $this->field_config['include_empty']
+        ));
+
+        // Log the ORIGINAL entry data (before transformation)
+        $this->log_debug('BEFORE TRANSFORMATION - Original entry data', array(
+            'entry_keys' => array_keys($entry),
+            'entry_data_sample' => array_slice($entry, 0, 10, true)
         ));
 
         // Track statistics for logging
@@ -516,6 +522,16 @@ class GF_Webhook_Field_Mapper {
         ));
 
         $this->log_debug('Final webhook payload fields', array_keys($mapped_data));
+
+        // Log the TRANSFORMED data structure (after field mapping)
+        $this->log_debug('AFTER TRANSFORMATION - Mapped webhook data', array(
+            'field_count' => count($mapped_data),
+            'field_names' => array_keys($mapped_data),
+            'sample_data' => array_slice($mapped_data, 0, 10, true)
+        ));
+
+        // Log the full payload for debugging (be careful with sensitive data)
+        $this->log_debug('FULL WEBHOOK PAYLOAD', $mapped_data);
 
         // Completely replace the original data - no duplicates
         return $mapped_data;
@@ -1329,10 +1345,17 @@ class GF_Webhook_Field_Mapper {
      * @return array Result with 'success', 'response_code', and 'message'
      */
     private function send_webhook($entry, $form, $webhook) {
+        $this->log_debug('MANUAL RESEND - Starting webhook send', array(
+            'entry_id' => $entry['id'],
+            'form_id' => $form['id'],
+            'webhook_name' => isset($webhook['meta']['feedName']) ? $webhook['meta']['feedName'] : 'Unknown'
+        ));
+
         // Get the webhook URL
         $url = isset($webhook['meta']['requestURL']) ? $webhook['meta']['requestURL'] : '';
 
         if (empty($url)) {
+            $this->log_debug('MANUAL RESEND - ERROR: No webhook URL configured');
             return array(
                 'success' => false,
                 'response_code' => 0,
@@ -1340,8 +1363,16 @@ class GF_Webhook_Field_Mapper {
             );
         }
 
+        $this->log_debug('MANUAL RESEND - Webhook URL', array('url' => $url));
+
         // Map the entry data using our field mapper
+        $this->log_debug('MANUAL RESEND - Calling modify_webhook_data for field mapping');
         $mapped_data = $this->modify_webhook_data(array(), array(), $entry, $form);
+
+        $this->log_debug('MANUAL RESEND - Data mapped, ready to send', array(
+            'field_count' => count($mapped_data),
+            'field_names' => array_keys($mapped_data)
+        ));
 
         // Send the webhook using wp_remote_post
         $response = wp_remote_post($url, array(
@@ -1358,6 +1389,9 @@ class GF_Webhook_Field_Mapper {
         ));
 
         if (is_wp_error($response)) {
+            $this->log_debug('MANUAL RESEND - ERROR: wp_remote_post failed', array(
+                'error_message' => $response->get_error_message()
+            ));
             return array(
                 'success' => false,
                 'response_code' => 0,
@@ -1367,6 +1401,13 @@ class GF_Webhook_Field_Mapper {
 
         $response_code = wp_remote_retrieve_response_code($response);
         $response_body = wp_remote_retrieve_body($response);
+
+        $this->log_debug('MANUAL RESEND - Webhook response received', array(
+            'response_code' => $response_code,
+            'success' => ($response_code >= 200 && $response_code < 300),
+            'response_body_length' => strlen($response_body),
+            'response_body_preview' => substr($response_body, 0, 200)
+        ));
 
         return array(
             'success' => ($response_code >= 200 && $response_code < 300),
