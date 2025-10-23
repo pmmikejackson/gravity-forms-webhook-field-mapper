@@ -3,7 +3,7 @@
  * Plugin Name: Gravity Forms Webhook Field Mapper
  * Plugin URI: https://github.com/mjhome/gravity-forms-webhook-field-mapper
  * Description: Maps Gravity Forms field IDs to field names in webhook data
- * Version: 1.4.0-dev.4
+ * Version: 1.4.0-dev.5
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
@@ -107,32 +107,37 @@ class GF_Webhook_Field_Mapper {
         // Note: This action may not exist in all GF versions
         add_action('gform_post_send_entry_to_webhook', array($this, 'log_webhook_sent'), 10, 4);
 
-        // Hook BEFORE webhook processing to see if feeds are being evaluated
-        add_filter('gform_webhooks_is_feed_condition_met', array($this, 'log_feed_condition_check'), 10, 4);
+        // Hook into feed processing (alternative approach)
+        add_action('gform_gravityformswebhooks_pre_process_feeds', array($this, 'log_webhook_feed_processing'), 10, 3);
 
         // Also hook into form submission to verify webhook processing
         add_action('gform_after_submission', array($this, 'log_form_submission'), 10, 2);
     }
 
     /**
-     * Log when webhook feed conditions are checked
+     * Log when webhook feeds are being processed
      *
-     * @param bool $is_met Whether the condition is met
-     * @param array $feed The feed object
+     * @param array $feeds Array of feeds to be processed
      * @param array $entry The entry object
      * @param array $form The form object
-     * @return bool
      */
-    public function log_feed_condition_check($is_met, $feed, $entry, $form) {
-        $this->log_debug('Webhook feed condition check', array(
-            'feed_name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unknown',
-            'feed_id' => $feed['id'],
-            'is_active' => $feed['is_active'],
-            'condition_met' => $is_met ? 'YES' : 'NO',
-            'has_conditional_logic' => isset($feed['meta']['feed_condition_conditional_logic']) && $feed['meta']['feed_condition_conditional_logic'] ? 'YES' : 'NO'
+    public function log_webhook_feed_processing($feeds, $entry, $form) {
+        $this->log_debug('Webhooks Add-On pre-processing feeds', array(
+            'number_of_feeds' => count($feeds),
+            'entry_id' => $entry['id'],
+            'form_id' => $form['id']
         ));
 
-        return $is_met;
+        if (is_array($feeds)) {
+            foreach ($feeds as $feed) {
+                $this->log_debug('Processing webhook feed', array(
+                    'feed_id' => $feed['id'],
+                    'feed_name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unknown',
+                    'is_active' => $feed['is_active'] ? 'YES' : 'NO',
+                    'request_url' => isset($feed['meta']['requestURL']) ? $feed['meta']['requestURL'] : 'Not set'
+                ));
+            }
+        }
     }
 
     /**
