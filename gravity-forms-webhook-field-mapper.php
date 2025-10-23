@@ -3,7 +3,7 @@
  * Plugin Name: Gravity Forms Webhook Field Mapper
  * Plugin URI: https://github.com/mjhome/gravity-forms-webhook-field-mapper
  * Description: Maps Gravity Forms field IDs to field names in webhook data
- * Version: 1.4.0-dev
+ * Version: 1.4.0-dev.2
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
@@ -97,14 +97,32 @@ class GF_Webhook_Field_Mapper {
             return;
         }
 
-        // Hook into the webhook request data
+        // Hook into the webhook request data (this modifies the payload)
         add_filter('gform_webhooks_request_data', array($this, 'modify_webhook_data'), 10, 4);
 
         // Alternative hook for older versions
         add_filter('gform_zapier_request_body', array($this, 'modify_webhook_data'), 10, 4);
 
         // Hook to log when webhooks are actually sent (for debugging)
+        // Note: This action may not exist in all GF versions
         add_action('gform_post_send_entry_to_webhook', array($this, 'log_webhook_sent'), 10, 4);
+
+        // Also hook into form submission to verify webhook processing
+        add_action('gform_after_submission', array($this, 'log_form_submission'), 10, 2);
+    }
+
+    /**
+     * Log form submission to verify webhooks should fire
+     *
+     * @param array $entry The entry that was submitted
+     * @param array $form The form object
+     */
+    public function log_form_submission($entry, $form) {
+        $this->log_debug('Form submitted - webhooks should fire now', array(
+            'form_id' => $form['id'],
+            'form_title' => $form['title'],
+            'entry_id' => $entry['id']
+        ));
     }
 
     /**
