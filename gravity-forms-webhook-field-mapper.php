@@ -3,7 +3,7 @@
  * Plugin Name: Gravity Forms Webhook Field Mapper
  * Plugin URI: https://github.com/mjhome/gravity-forms-webhook-field-mapper
  * Description: Maps Gravity Forms field IDs to field names in webhook data
- * Version: 1.3.0
+ * Version: 1.4.0
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
@@ -22,6 +22,22 @@ if (!defined('ABSPATH')) {
 class GF_Webhook_Field_Mapper {
 
     /**
+     * Field filtering configuration
+     *
+     * Configure which fields to include in webhook payloads:
+     * - 'mode' => 'whitelist' (only send specified fields) or 'blacklist' (send all except specified fields)
+     * - 'fields' => array of field admin labels or field labels to include/exclude
+     * - 'include_empty' => true/false (whether to include fields with empty values)
+     * - 'required_fields' => array of field admin labels that should always be included even if empty
+     */
+    private $field_config = array(
+        'mode' => 'all',  // Options: 'all', 'whitelist', 'blacklist', 'admin_label_only'
+        'fields' => array(), // Array of field labels/admin labels to include or exclude
+        'include_empty' => false, // Whether to include empty fields
+        'required_fields' => array(), // Fields to always include even if empty
+    );
+
+    /**
      * Initialize the plugin
      */
     public function __construct() {
@@ -32,6 +48,44 @@ class GF_Webhook_Field_Mapper {
 
         // Add metabox to entry detail page
         add_action('gform_entry_detail_sidebar_middle', array($this, 'add_resend_metabox'), 10, 2);
+
+        // Load field configuration from WordPress options
+        $this->load_field_config();
+    }
+
+    /**
+     * Load field configuration from WordPress options
+     */
+    private function load_field_config() {
+        $saved_config = get_option('gf_webhook_field_mapper_config', array());
+
+        if (!empty($saved_config)) {
+            $this->field_config = array_merge($this->field_config, $saved_config);
+        }
+    }
+
+    /**
+     * Save field configuration to WordPress options
+     */
+    private function save_field_config() {
+        update_option('gf_webhook_field_mapper_config', $this->field_config);
+    }
+
+    /**
+     * Get current field configuration
+     */
+    public function get_field_config() {
+        return $this->field_config;
+    }
+
+    /**
+     * Update field configuration
+     *
+     * @param array $config New configuration settings
+     */
+    public function update_field_config($config) {
+        $this->field_config = array_merge($this->field_config, $config);
+        $this->save_field_config();
     }
 
     /**
@@ -43,11 +97,118 @@ class GF_Webhook_Field_Mapper {
             return;
         }
 
-        // Hook into the webhook request data
+        // Hook into the webhook request data (this modifies the payload)
         add_filter('gform_webhooks_request_data', array($this, 'modify_webhook_data'), 10, 4);
 
         // Alternative hook for older versions
         add_filter('gform_zapier_request_body', array($this, 'modify_webhook_data'), 10, 4);
+
+        // Hook to log when webhooks are actually sent (for debugging)
+        // Note: This action may not exist in all GF versions
+        add_action('gform_post_send_entry_to_webhook', array($this, 'log_webhook_sent'), 10, 4);
+
+        // Hook into feed processing (alternative approach)
+        add_action('gform_gravityformswebhooks_pre_process_feeds', array($this, 'log_webhook_feed_processing'), 10, 3);
+
+        // Also hook into form submission to verify webhook processing
+        add_action('gform_after_submission', array($this, 'log_form_submission'), 10, 2);
+    }
+
+    /**
+     * Log when webhook feeds are being processed
+     *
+     * @param array $feeds Array of feeds to be processed
+     * @param array $entry The entry object
+     * @param array $form The form object
+     */
+    public function log_webhook_feed_processing($feeds, $entry, $form) {
+        $this->log_debug('Webhooks Add-On pre-processing feeds', array(
+            'number_of_feeds' => count($feeds),
+            'entry_id' => $entry['id'],
+            'form_id' => $form['id']
+        ));
+
+        if (is_array($feeds)) {
+            foreach ($feeds as $feed) {
+                $this->log_debug('Processing webhook feed', array(
+                    'feed_id' => $feed['id'],
+                    'feed_name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unknown',
+                    'is_active' => $feed['is_active'] ? 'YES' : 'NO',
+                    'request_url' => isset($feed['meta']['requestURL']) ? $feed['meta']['requestURL'] : 'Not set'
+                ));
+            }
+        }
+    }
+
+    /**
+     * Log form submission to verify webhooks should fire
+     *
+     * @param array $entry The entry that was submitted
+     * @param array $form The form object
+     */
+    public function log_form_submission($entry, $form) {
+        // Get webhook feeds for this form
+        $feeds = GFAPI::get_feeds(null, $form['id'], 'gravityformswebhooks');
+
+        $feed_info = array();
+        if (is_array($feeds)) {
+            foreach ($feeds as $feed) {
+                $feed_info[] = array(
+                    'id' => $feed['id'],
+                    'name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unnamed',
+                    'is_active' => $feed['is_active'],
+                    'event' => isset($feed['meta']['event']) ? $feed['meta']['event'] : 'not set',
+                );
+            }
+        }
+
+        $this->log_debug('Form submitted - webhooks should fire now', array(
+            'form_id' => $form['id'],
+            'form_title' => $form['title'],
+            'entry_id' => $entry['id'],
+            'webhook_feeds_found' => count($feeds),
+            'feeds' => $feed_info
+        ));
+    }
+
+    /**
+     * Log debug information
+     *
+     * @param string $message The message to log
+     * @param mixed $data Additional data to log
+     */
+    private function log_debug($message, $data = null) {
+        // Only log if WP_DEBUG is enabled
+        if (!defined('WP_DEBUG') || !WP_DEBUG) {
+            return;
+        }
+
+        $log_message = '[GF Webhook Field Mapper] ' . $message;
+
+        if ($data !== null) {
+            $log_message .= ' | Data: ' . print_r($data, true);
+        }
+
+        error_log($log_message);
+    }
+
+    /**
+     * Log when webhook is sent (debugging hook)
+     *
+     * @param array $response The response from the webhook
+     * @param array $feed The webhook feed
+     * @param array $entry The entry
+     * @param array $form The form
+     */
+    public function log_webhook_sent($response, $feed, $entry, $form) {
+        $this->log_debug('Webhook sent', array(
+            'form_id' => $form['id'],
+            'form_title' => $form['title'],
+            'entry_id' => $entry['id'],
+            'webhook_name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unknown',
+            'webhook_url' => isset($feed['meta']['requestURL']) ? $feed['meta']['requestURL'] : 'Unknown',
+            'response_code' => is_array($response) && isset($response['response']['code']) ? $response['response']['code'] : 'Unknown'
+        ));
     }
 
     /**
@@ -62,6 +223,27 @@ class GF_Webhook_Field_Mapper {
      * @noinspection PhpUnusedParameterInspection
      */
     public function modify_webhook_data($request_data, $feed, $entry, $form) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter
+        $this->log_debug('Webhook data modification started', array(
+            'form_id' => $form['id'],
+            'entry_id' => $entry['id'],
+            'filter_mode' => $this->field_config['mode'],
+            'include_empty' => $this->field_config['include_empty']
+        ));
+
+        // Log the ORIGINAL entry data (before transformation)
+        $this->log_debug('BEFORE TRANSFORMATION - Original entry data', array(
+            'entry_keys' => array_keys($entry),
+            'entry_data_sample' => array_slice($entry, 0, 10, true)
+        ));
+
+        // Track statistics for logging
+        $stats = array(
+            'total_fields' => 0,
+            'included_fields' => 0,
+            'excluded_by_filter' => 0,
+            'excluded_by_empty' => 0
+        );
+
         // Create new data array with field names (completely replace the original)
         $mapped_data = array();
 
@@ -71,8 +253,10 @@ class GF_Webhook_Field_Mapper {
         $mapped_data['entry_id'] = $entry['id'];
         $mapped_data['date_created'] = $entry['date_created'];
 
-        // Map each field (including empty ones)
+        // Map each field (respecting filter configuration)
         foreach ($form['fields'] as $field) {
+            $stats['total_fields']++;
+
             $field_id = $field->id;
             $field_label = $this->get_field_label($field);
 
@@ -81,12 +265,26 @@ class GF_Webhook_Field_Mapper {
                 $field_label = $field_label . '_' . $field_id;
             }
 
+            // Check if this field should be included based on configuration
+            if (!$this->should_include_field($field, $field_label)) {
+                $stats['excluded_by_filter']++;
+                $this->log_debug('Field excluded by filter', array(
+                    'field_id' => $field_id,
+                    'field_label' => $field_label,
+                    'has_admin_label' => !empty($field->adminLabel)
+                ));
+                continue; // Skip this field
+            }
+
+            // Variable to hold the field value before adding to mapped_data
+            $field_value = null;
+
             // Handle different field types with special sub-field structures
             if ($field->type == 'name') {
                 // Handle name fields with sub-fields
                 $name_parts = array();
 
-                // Always include all possible name sub-fields
+                // Include all possible name sub-fields
                 $name_parts['prefix'] = isset($entry[$field_id . '.2']) ? $entry[$field_id . '.2'] : '';
                 $name_parts['first'] = isset($entry[$field_id . '.3']) ? $entry[$field_id . '.3'] : '';
                 $name_parts['middle'] = isset($entry[$field_id . '.4']) ? $entry[$field_id . '.4'] : '';
@@ -98,14 +296,13 @@ class GF_Webhook_Field_Mapper {
                     $name_parts['full'] = $entry[$field_id];
                 }
 
-                // Always include the field with all sub-fields
-                $mapped_data[$field_label] = $name_parts;
+                $field_value = $name_parts;
 
             } elseif ($field->type == 'address') {
                 // Handle address fields with sub-fields
                 $address_parts = array();
 
-                // Always include all address sub-fields
+                // Include all address sub-fields
                 $address_parts['street'] = isset($entry[$field_id . '.1']) ? $entry[$field_id . '.1'] : '';
                 $address_parts['street2'] = isset($entry[$field_id . '.2']) ? $entry[$field_id . '.2'] : '';
                 $address_parts['city'] = isset($entry[$field_id . '.3']) ? $entry[$field_id . '.3'] : '';
@@ -113,41 +310,38 @@ class GF_Webhook_Field_Mapper {
                 $address_parts['zip'] = isset($entry[$field_id . '.5']) ? $entry[$field_id . '.5'] : '';
                 $address_parts['country'] = isset($entry[$field_id . '.6']) ? $entry[$field_id . '.6'] : '';
 
-                // Always include the field with all sub-fields
-                $mapped_data[$field_label] = $address_parts;
+                $field_value = $address_parts;
 
             } elseif ($field->type == 'date') {
                 // Handle date fields with sub-fields
-                $date_parts = array();
-
                 if (is_array($field->inputs)) {
                     // Date field with separate inputs (month, day, year)
+                    $date_parts = array();
                     foreach ($field->inputs as $input) {
                         $input_id = $input['id'];
                         $input_label = !empty($input['label']) ? $this->sanitize_label($input['label']) : 'input_' . str_replace('.', '_', $input_id);
                         $date_parts[$input_label] = isset($entry[$input_id]) ? $entry[$input_id] : '';
                     }
-                    $mapped_data[$field_label] = $date_parts;
+                    $field_value = $date_parts;
                 } else {
                     // Single date input
-                    $mapped_data[$field_label] = isset($entry[$field_id]) ? $entry[$field_id] : '';
+                    $field_value = isset($entry[$field_id]) ? $entry[$field_id] : '';
                 }
 
             } elseif ($field->type == 'time') {
                 // Handle time fields with sub-fields
-                $time_parts = array();
-
                 if (is_array($field->inputs)) {
                     // Time field with separate inputs (hour, minute, am/pm)
+                    $time_parts = array();
                     foreach ($field->inputs as $input) {
                         $input_id = $input['id'];
                         $input_label = !empty($input['label']) ? $this->sanitize_label($input['label']) : 'input_' . str_replace('.', '_', $input_id);
                         $time_parts[$input_label] = isset($entry[$input_id]) ? $entry[$input_id] : '';
                     }
-                    $mapped_data[$field_label] = $time_parts;
+                    $field_value = $time_parts;
                 } else {
                     // Single time input
-                    $mapped_data[$field_label] = isset($entry[$field_id]) ? $entry[$field_id] : '';
+                    $field_value = isset($entry[$field_id]) ? $entry[$field_id] : '';
                 }
 
             } elseif ($field->type == 'checkbox') {
@@ -164,13 +358,8 @@ class GF_Webhook_Field_Mapper {
                     }
                 }
 
-                // Convert to comma-separated string for specific fields (174 = Training, 175 = Pre-Employment)
-                if (in_array($field_id, array(174, 175))) {
-                    $mapped_data[$field_label] = !empty($checkbox_values) ? implode(', ', $checkbox_values) : '';
-                } else {
-                    // Always include the field, even if no checkboxes selected
-                    $mapped_data[$field_label] = $checkbox_values;
-                }
+                // Always return checkbox values as an array for consistency
+                $field_value = $checkbox_values;
 
             } elseif ($field->type == 'list') {
                 // Handle list fields
@@ -179,17 +368,16 @@ class GF_Webhook_Field_Mapper {
                     $list_values = maybe_unserialize($entry[$field_id]); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_maybe_unserialize
                 }
 
-                // Always include the field, even if empty
-                $mapped_data[$field_label] = $list_values ? $list_values : '';
+                $field_value = $list_values ? $list_values : '';
 
             } else {
-                // Handle standard fields - always include them even if empty
+                // Handle standard fields
                 $value = isset($entry[$field_id]) ? $entry[$field_id] : '';
 
                 // Handle fields with multiple inputs
                 if (!is_array($field->inputs) || empty($field->inputs)) {
                     // Simple field with no inputs - use the main field value
-                    $mapped_data[$field_label] = $value;
+                    $field_value = $value;
                 } else {
                     // For fields with inputs (like email with confirmation, date fields, time fields)
                     $input_values = array();
@@ -205,28 +393,24 @@ class GF_Webhook_Field_Mapper {
                             $input_values[$input_label] = $input_value;
                         } else {
                             // Single input field - use the value directly
-                            $mapped_data[$field_label] = $input_value;
+                            $field_value = $input_value;
                         }
                     }
 
                     if ($has_multiple_inputs) {
                         // For multi-input fields, include all sub-fields
-                        $mapped_data[$field_label] = $input_values;
+                        $field_value = $input_values;
                     }
 
                     // If we still don't have a value but the main field has data, use that
-                    if ((!isset($mapped_data[$field_label]) || $mapped_data[$field_label] === '') && $value !== '') {
-                        $mapped_data[$field_label] = $value;
+                    if ((!isset($field_value) || $field_value === '') && $value !== '') {
+                        $field_value = $value;
                     }
                 }
             }
 
-            // Safety net: ensure this field was mapped, even if empty
-            // This catches any field types that might have been missed by the handlers above
-            if (!isset($mapped_data[$field_label])) {
-                // Try to get the value from the entry
-                $field_value = '';
-
+            // Safety net: if field_value is still null, try to get it from entry
+            if ($field_value === null) {
                 // First, try the direct field ID
                 if (isset($entry[$field_id]) && $entry[$field_id] !== '') {
                     $field_value = $entry[$field_id];
@@ -241,9 +425,28 @@ class GF_Webhook_Field_Mapper {
                             break; // Use the first non-empty input value
                         }
                     }
+                } else {
+                    $field_value = '';
                 }
+            }
 
+            // Check if we should include this field based on empty value configuration
+            $is_empty = $this->is_empty_value($field_value);
+            $is_required = $this->is_required_field($field_label, $field);
+
+            // Include the field if:
+            // 1. include_empty is true, OR
+            // 2. The value is not empty, OR
+            // 3. The field is required (should always be included)
+            if ($this->field_config['include_empty'] || !$is_empty || $is_required) {
                 $mapped_data[$field_label] = $field_value;
+                $stats['included_fields']++;
+            } else {
+                $stats['excluded_by_empty']++;
+                $this->log_debug('Field excluded (empty value)', array(
+                    'field_id' => $field_id,
+                    'field_label' => $field_label
+                ));
             }
         }
 
@@ -309,6 +512,27 @@ class GF_Webhook_Field_Mapper {
         // Add IP address if available
         $mapped_data['ip_address'] = isset($entry['ip']) ? $entry['ip'] : '';
 
+        // Log summary
+        $this->log_debug('Webhook data modification completed', array(
+            'total_fields_processed' => $stats['total_fields'],
+            'fields_included' => $stats['included_fields'],
+            'fields_excluded_by_filter' => $stats['excluded_by_filter'],
+            'fields_excluded_by_empty' => $stats['excluded_by_empty'],
+            'total_fields_in_payload' => count($mapped_data)
+        ));
+
+        $this->log_debug('Final webhook payload fields', array_keys($mapped_data));
+
+        // Log the TRANSFORMED data structure (after field mapping)
+        $this->log_debug('AFTER TRANSFORMATION - Mapped webhook data', array(
+            'field_count' => count($mapped_data),
+            'field_names' => array_keys($mapped_data),
+            'sample_data' => array_slice($mapped_data, 0, 10, true)
+        ));
+
+        // Log the full payload for debugging (be careful with sensitive data)
+        $this->log_debug('FULL WEBHOOK PAYLOAD', $mapped_data);
+
         // Completely replace the original data - no duplicates
         return $mapped_data;
     }
@@ -332,6 +556,79 @@ class GF_Webhook_Field_Mapper {
 
         // Last resort: field type with ID
         return $field->type . '_' . $field->id;
+    }
+
+    /**
+     * Check if a field should be included based on configuration
+     *
+     * @param object $field The field object
+     * @param string $field_label The sanitized field label
+     * @return bool Whether to include this field
+     */
+    private function should_include_field($field, $field_label) {
+        $mode = $this->field_config['mode'];
+
+        // Mode: all - include everything
+        if ($mode === 'all') {
+            return true;
+        }
+
+        // Mode: admin_label_only - only include if field has admin label
+        if ($mode === 'admin_label_only') {
+            return !empty($field->adminLabel);
+        }
+
+        // Mode: whitelist - only include if in the list
+        if ($mode === 'whitelist') {
+            return in_array($field_label, $this->field_config['fields']) ||
+                   (!empty($field->adminLabel) && in_array($this->sanitize_label($field->adminLabel), $this->field_config['fields'])) ||
+                   (!empty($field->label) && in_array($this->sanitize_label($field->label), $this->field_config['fields']));
+        }
+
+        // Mode: blacklist - exclude if in the list
+        if ($mode === 'blacklist') {
+            $is_blacklisted = in_array($field_label, $this->field_config['fields']) ||
+                              (!empty($field->adminLabel) && in_array($this->sanitize_label($field->adminLabel), $this->field_config['fields'])) ||
+                              (!empty($field->label) && in_array($this->sanitize_label($field->label), $this->field_config['fields']));
+            return !$is_blacklisted;
+        }
+
+        return true; // Default to including
+    }
+
+    /**
+     * Check if a field value is empty
+     *
+     * @param mixed $value The value to check
+     * @return bool Whether the value is considered empty
+     */
+    private function is_empty_value($value) {
+        // Handle arrays (like checkbox values, name parts, etc.)
+        if (is_array($value)) {
+            // Check if all array values are empty
+            foreach ($value as $v) {
+                if (!$this->is_empty_value($v)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // Handle strings and other scalar values
+        return $value === '' || $value === null;
+    }
+
+    /**
+     * Check if a field is required (should always be included even if empty)
+     *
+     * @param string $field_label The sanitized field label
+     * @param object $field The field object
+     * @return bool Whether this is a required field
+     */
+    private function is_required_field($field_label, $field) {
+        return in_array($field_label, $this->field_config['required_fields']) ||
+               (!empty($field->adminLabel) && in_array($this->sanitize_label($field->adminLabel), $this->field_config['required_fields'])) ||
+               (!empty($field->label) && in_array($this->sanitize_label($field->label), $this->field_config['required_fields']));
     }
 
     /**
@@ -403,6 +700,16 @@ class GF_Webhook_Field_Mapper {
             'dashicons-networking',                     // Icon
             80                                          // Position (after Settings)
         );
+
+        // Add submenu for settings
+        add_submenu_page(
+            'gf-webhook-manager',                       // Parent slug
+            'Field Configuration',                      // Page title
+            'Field Configuration',                      // Menu title
+            'manage_options',                           // Capability
+            'gf-webhook-field-config',                  // Menu slug
+            array($this, 'render_config_page')          // Callback
+        );
     }
 
     /**
@@ -411,6 +718,9 @@ class GF_Webhook_Field_Mapper {
     public function render_admin_page() {
         // Handle form submission for resending webhooks
         if (isset($_POST['resend_webhook_submit']) && check_admin_referer('resend_webhook_action', 'resend_webhook_nonce')) {
+            if (!current_user_can('manage_options')) {
+                wp_die(__('You do not have sufficient permissions to perform this action.'));
+            }
             $this->handle_webhook_resend();
         }
 
@@ -442,11 +752,156 @@ class GF_Webhook_Field_Mapper {
     }
 
     /**
+     * Render field configuration page
+     */
+    public function render_config_page() {
+        // Handle form submission
+        if (isset($_POST['save_field_config']) && check_admin_referer('save_field_config_action', 'field_config_nonce')) {
+            $this->handle_config_save();
+        }
+
+        // Display admin notice if present
+        if ($message = get_transient('gf_webhook_mapper_admin_notice')) {
+            echo '<div class="notice notice-success is-dismissible"><p>' . esc_html($message) . '</p></div>';
+            delete_transient('gf_webhook_mapper_admin_notice');
+        }
+
+        $config = $this->field_config;
+        ?>
+        <div class="wrap">
+            <h1>Webhook Field Configuration</h1>
+            <p>Configure which fields are included in webhook payloads.</p>
+
+            <form method="post" action="">
+                <?php wp_nonce_field('save_field_config_action', 'field_config_nonce'); ?>
+
+                <table class="form-table">
+                    <tr>
+                        <th scope="row">
+                            <label for="filter_mode">Filter Mode</label>
+                        </th>
+                        <td>
+                            <select name="filter_mode" id="filter_mode">
+                                <option value="all" <?php selected($config['mode'], 'all'); ?>>Send All Fields</option>
+                                <option value="admin_label_only" <?php selected($config['mode'], 'admin_label_only'); ?>>Only Fields with Admin Labels</option>
+                                <option value="whitelist" <?php selected($config['mode'], 'whitelist'); ?>>Whitelist (Only Specified Fields)</option>
+                                <option value="blacklist" <?php selected($config['mode'], 'blacklist'); ?>>Blacklist (Exclude Specified Fields)</option>
+                            </select>
+                            <p class="description">
+                                <strong>All Fields:</strong> Send all form fields (current behavior)<br/>
+                                <strong>Admin Labels Only:</strong> Send only fields that have an admin label set<br/>
+                                <strong>Whitelist:</strong> Only send fields specified below<br/>
+                                <strong>Blacklist:</strong> Send all fields except those specified below
+                            </p>
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <th scope="row">
+                            <label for="field_list">Field List</label>
+                        </th>
+                        <td>
+                            <textarea name="field_list" id="field_list" rows="10" cols="50" class="large-text code"><?php echo esc_textarea(implode("\n", $config['fields'])); ?></textarea>
+                            <p class="description">
+                                Enter one field admin label or field label per line.<br/>
+                                Used for whitelist or blacklist modes.<br/>
+                                Example: company_name
+                            </p>
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <th scope="row">
+                            <label for="include_empty">Include Empty Fields</label>
+                        </th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="include_empty" id="include_empty" value="1" <?php checked($config['include_empty'], true); ?> />
+                                Include fields with empty or null values in webhook payload
+                            </label>
+                            <p class="description">
+                                When unchecked, fields with empty values will be excluded from the webhook payload (unless they're in the Required Fields list below).
+                            </p>
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <th scope="row">
+                            <label for="required_fields">Required Fields</label>
+                        </th>
+                        <td>
+                            <textarea name="required_fields" id="required_fields" rows="5" cols="50" class="large-text code"><?php echo esc_textarea(implode("\n", $config['required_fields'])); ?></textarea>
+                            <p class="description">
+                                Enter one field admin label or field label per line.<br/>
+                                These fields will always be included in the webhook, even if they are empty.<br/>
+                                Example: form_id
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+
+                <p class="submit">
+                    <button type="submit" name="save_field_config" class="button button-primary">Save Configuration</button>
+                </p>
+            </form>
+
+            <hr/>
+
+            <h2>Debug Information</h2>
+            <h3>Current Configuration</h3>
+            <pre><?php echo esc_html(print_r($config, true)); ?></pre>
+        </div>
+        <?php
+    }
+
+    /**
+     * Handle configuration save
+     */
+    private function handle_config_save() {
+        // Add capability check as defense in depth
+        if (!current_user_can('manage_options')) {
+            wp_die(__('You do not have sufficient permissions to access this page.'));
+        }
+
+        // Validate mode against whitelist
+        $allowed_modes = array('all', 'whitelist', 'blacklist', 'admin_label_only');
+        $mode = isset($_POST['filter_mode']) ? sanitize_text_field($_POST['filter_mode']) : 'all';
+        if (!in_array($mode, $allowed_modes, true)) {
+            $mode = 'all'; // Fallback to safe default
+        }
+
+        $new_config = array(
+            'mode' => $mode,
+            'include_empty' => !empty($_POST['include_empty']) && $_POST['include_empty'] === '1',
+        );
+
+        // Parse field list
+        $field_list = isset($_POST['field_list']) ? sanitize_textarea_field($_POST['field_list']) : '';
+        $fields = array_filter(array_map('trim', explode("\n", $field_list)));
+        $new_config['fields'] = $fields;
+
+        // Parse required fields list
+        $required_list = isset($_POST['required_fields']) ? sanitize_textarea_field($_POST['required_fields']) : '';
+        $required_fields = array_filter(array_map('trim', explode("\n", $required_list)));
+        $new_config['required_fields'] = $required_fields;
+
+        $this->update_field_config($new_config);
+
+        // Use WordPress transients for admin notices
+        set_transient('gf_webhook_mapper_admin_notice', 'Configuration saved successfully!', 45);
+    }
+
+    /**
      * Render entry list table
      */
     private function render_entry_list() {
         // Get all forms
         $forms = GFAPI::get_forms();
+        if (is_wp_error($forms)) {
+            error_log('[GF Webhook Field Mapper] Error fetching forms: ' . $forms->get_error_message());
+            echo '<div class="notice notice-error"><p>Error loading forms. Please try again.</p></div>';
+            return;
+        }
 
         // Get selected form ID from query string
         $selected_form_id = isset($_GET['form_id']) ? absint($_GET['form_id']) : 0;
@@ -474,13 +929,23 @@ class GF_Webhook_Field_Mapper {
             $search_criteria = array();
             if ($selected_form_id > 0) {
                 $entries = GFAPI::get_entries($selected_form_id);
+                if (is_wp_error($entries)) {
+                    error_log('[GF Webhook Field Mapper] Error fetching entries: ' . $entries->get_error_message());
+                    $entries = array();
+                }
                 $current_form = GFAPI::get_form($selected_form_id);
+                if (is_wp_error($current_form)) {
+                    error_log('[GF Webhook Field Mapper] Error fetching form: ' . $current_form->get_error_message());
+                    $current_form = null;
+                }
             } else {
                 // Get entries from all forms
                 $entries = array();
                 foreach ($forms as $form) {
                     $form_entries = GFAPI::get_entries($form['id']);
-                    $entries = array_merge($entries, $form_entries);
+                    if (!is_wp_error($form_entries) && is_array($form_entries)) {
+                        $entries = array_merge($entries, $form_entries);
+                    }
                 }
             }
 
@@ -579,7 +1044,7 @@ class GF_Webhook_Field_Mapper {
      */
     private function render_log_viewer() {
         global $wpdb;
-        $table_name = $wpdb->prefix . 'gf_webhook_log';
+        $table_name = esc_sql($wpdb->prefix . 'gf_webhook_log');
 
         // Get filter parameters
         $filter_status = isset($_GET['status']) ? sanitize_text_field($_GET['status']) : '';
@@ -607,17 +1072,15 @@ class GF_Webhook_Field_Mapper {
             $query_params[] = absint($search);
         }
 
-        $where_sql = '';
-        if (!empty($where_clauses)) {
-            $where_sql = 'WHERE ' . implode(' AND ', $where_clauses);
-        }
+        // Fix: Only add WHERE if we have clauses
+        $where_sql = !empty($where_clauses) ? 'WHERE ' . implode(' AND ', $where_clauses) : '';
 
         // Get total count
-        $total_query = "SELECT COUNT(*) FROM $table_name $where_sql";
+        $total_query = "SELECT COUNT(*) FROM {$table_name} {$where_sql}";
         if (!empty($query_params)) {
             $total_count = $wpdb->get_var($wpdb->prepare($total_query, $query_params));
         } else {
-            $total_count = $wpdb->get_var($total_query);
+            $total_count = $wpdb->get_var($total_query); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
         }
 
         // Pagination
@@ -627,12 +1090,16 @@ class GF_Webhook_Field_Mapper {
         $total_pages = ceil($total_count / $per_page);
 
         // Get logs
-        $logs_query = "SELECT * FROM $table_name $where_sql ORDER BY created_at DESC LIMIT %d OFFSET %d";
+        $logs_query = "SELECT * FROM {$table_name} {$where_sql} ORDER BY created_at DESC LIMIT %d OFFSET %d";
         $final_params = array_merge($query_params, array($per_page, $offset));
-        $logs = $wpdb->get_results($wpdb->prepare($logs_query, $final_params));
+        $logs = $wpdb->get_results($wpdb->prepare($logs_query, $final_params)); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 
         // Get all forms for filter
         $forms = GFAPI::get_forms();
+        if (is_wp_error($forms)) {
+            error_log('[GF Webhook Field Mapper] Error fetching forms in log viewer: ' . $forms->get_error_message());
+            $forms = array();
+        }
 
         ?>
         <div class="gf-webhook-log-viewer">
@@ -805,12 +1272,14 @@ class GF_Webhook_Field_Mapper {
         foreach ($entry_ids as $entry_id) {
             $entry = GFAPI::get_entry($entry_id);
             if (is_wp_error($entry)) {
+                error_log('[GF Webhook Field Mapper] Error fetching entry ' . $entry_id . ': ' . $entry->get_error_message());
                 $error_count++;
                 continue;
             }
 
             $form = GFAPI::get_form($entry['form_id']);
             if (is_wp_error($form)) {
+                error_log('[GF Webhook Field Mapper] Error fetching form ' . $entry['form_id'] . ': ' . $form->get_error_message());
                 $error_count++;
                 continue;
             }
@@ -876,10 +1345,17 @@ class GF_Webhook_Field_Mapper {
      * @return array Result with 'success', 'response_code', and 'message'
      */
     private function send_webhook($entry, $form, $webhook) {
+        $this->log_debug('MANUAL RESEND - Starting webhook send', array(
+            'entry_id' => $entry['id'],
+            'form_id' => $form['id'],
+            'webhook_name' => isset($webhook['meta']['feedName']) ? $webhook['meta']['feedName'] : 'Unknown'
+        ));
+
         // Get the webhook URL
         $url = isset($webhook['meta']['requestURL']) ? $webhook['meta']['requestURL'] : '';
 
         if (empty($url)) {
+            $this->log_debug('MANUAL RESEND - ERROR: No webhook URL configured');
             return array(
                 'success' => false,
                 'response_code' => 0,
@@ -887,8 +1363,16 @@ class GF_Webhook_Field_Mapper {
             );
         }
 
+        $this->log_debug('MANUAL RESEND - Webhook URL', array('url' => $url));
+
         // Map the entry data using our field mapper
+        $this->log_debug('MANUAL RESEND - Calling modify_webhook_data for field mapping');
         $mapped_data = $this->modify_webhook_data(array(), array(), $entry, $form);
+
+        $this->log_debug('MANUAL RESEND - Data mapped, ready to send', array(
+            'field_count' => count($mapped_data),
+            'field_names' => array_keys($mapped_data)
+        ));
 
         // Send the webhook using wp_remote_post
         $response = wp_remote_post($url, array(
@@ -905,6 +1389,9 @@ class GF_Webhook_Field_Mapper {
         ));
 
         if (is_wp_error($response)) {
+            $this->log_debug('MANUAL RESEND - ERROR: wp_remote_post failed', array(
+                'error_message' => $response->get_error_message()
+            ));
             return array(
                 'success' => false,
                 'response_code' => 0,
@@ -914,6 +1401,13 @@ class GF_Webhook_Field_Mapper {
 
         $response_code = wp_remote_retrieve_response_code($response);
         $response_body = wp_remote_retrieve_body($response);
+
+        $this->log_debug('MANUAL RESEND - Webhook response received', array(
+            'response_code' => $response_code,
+            'success' => ($response_code >= 200 && $response_code < 300),
+            'response_body_length' => strlen($response_body),
+            'response_body_preview' => substr($response_body, 0, 200)
+        ));
 
         return array(
             'success' => ($response_code >= 200 && $response_code < 300),
@@ -963,6 +1457,9 @@ class GF_Webhook_Field_Mapper {
     public function add_resend_metabox($form, $entry) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter
         // Handle resend submission
         if (isset($_POST['gf_resend_webhook_submit']) && check_admin_referer('gf_resend_webhook_' . $entry['id'], 'gf_resend_webhook_nonce')) {
+            if (!current_user_can('manage_options')) {
+                wp_die(__('You do not have sufficient permissions to perform this action.'));
+            }
             $this->handle_single_entry_resend($entry, $form);
         }
 
