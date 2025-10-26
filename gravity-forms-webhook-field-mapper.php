@@ -3,7 +3,7 @@
  * Plugin Name: Gravity Forms Webhook Field Mapper
  * Plugin URI: https://github.com/mjhome/gravity-forms-webhook-field-mapper
  * Description: Maps Gravity Forms field IDs to field names in webhook data
- * Version: 1.4.0
+ * Version: 1.4.1
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
@@ -358,8 +358,8 @@ class GF_Webhook_Field_Mapper {
                     }
                 }
 
-                // Always return checkbox values as an array for consistency
-                $field_value = $checkbox_values;
+                // Return checkbox values as comma-separated string instead of array
+                $field_value = !empty($checkbox_values) ? implode(', ', $checkbox_values) : '';
 
             } elseif ($field->type == 'list') {
                 // Handle list fields
