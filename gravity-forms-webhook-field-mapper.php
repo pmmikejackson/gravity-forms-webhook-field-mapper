@@ -3,7 +3,7 @@
  * Plugin Name: Gravity Forms Webhook Field Mapper
  * Plugin URI: https://github.com/mjhome/gravity-forms-webhook-field-mapper
  * Description: Maps Gravity Forms field IDs to field names in webhook data
- * Version: 1.4.1
+ * Version: 1.4.2
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
@@ -29,12 +29,17 @@ class GF_Webhook_Field_Mapper {
      * - 'fields' => array of field admin labels or field labels to include/exclude
      * - 'include_empty' => true/false (whether to include fields with empty values)
      * - 'required_fields' => array of field admin labels that should always be included even if empty
+     * - 'combined_fields' => array of field ID combinations (main field ID => array of additional field IDs to append)
      */
     private $field_config = array(
         'mode' => 'all',  // Options: 'all', 'whitelist', 'blacklist', 'admin_label_only'
         'fields' => array(), // Array of field labels/admin labels to include or exclude
         'include_empty' => false, // Whether to include empty fields
         'required_fields' => array(), // Fields to always include even if empty
+        'combined_fields' => array( // Field combinations: main_field_id => array(additional_field_ids)
+            '174' => array('258'), // Employee training + "other" field
+            '175' => array('37'),  // Pre-employment screening + "other" field
+        ),
     );
 
     /**
@@ -244,6 +249,9 @@ class GF_Webhook_Field_Mapper {
             'excluded_by_empty' => 0
         );
 
+        // Track which fields have been processed to avoid duplicates
+        $processed_field_ids = array();
+
         // Create new data array with field names (completely replace the original)
         $mapped_data = array();
 
@@ -257,7 +265,17 @@ class GF_Webhook_Field_Mapper {
         foreach ($form['fields'] as $field) {
             $stats['total_fields']++;
 
-            $field_id = $field->id;
+            $field_id = (string)$field->id;
+
+            // Skip fields that are combined with other fields (they'll be processed as part of their parent field)
+            if ($this->is_combined_field($field_id)) {
+                $processed_field_ids[] = $field_id;
+                $this->log_debug('Field skipped (combined with another field)', array(
+                    'field_id' => $field_id
+                ));
+                continue;
+            }
+
             $field_label = $this->get_field_label($field);
 
             // Ensure unique field labels - if this label already exists, append the field ID
@@ -355,6 +373,19 @@ class GF_Webhook_Field_Mapper {
                         if (!empty($entry[$input_id])) {
                             $checkbox_values[] = $entry[$input_id];
                         }
+                    }
+                }
+
+                // Check if this field has combined fields (like "other" text fields)
+                $combined_field_ids = $this->get_combined_field_ids($field_id);
+                if (!empty($combined_field_ids)) {
+                    foreach ($combined_field_ids as $combined_id) {
+                        $combined_value = isset($entry[$combined_id]) ? trim($entry[$combined_id]) : '';
+                        if (!empty($combined_value)) {
+                            $checkbox_values[] = $combined_value;
+                        }
+                        // Mark this field as processed
+                        $processed_field_ids[] = (string)$combined_id;
                     }
                 }
 
@@ -656,6 +687,45 @@ class GF_Webhook_Field_Mapper {
         }
 
         return $label;
+    }
+
+    /**
+     * Check if a field ID is combined with another field
+     * (i.e., it should be skipped because it's included in another field's value)
+     *
+     * @param string $field_id The field ID to check
+     * @return bool Whether this field is combined with another
+     */
+    private function is_combined_field($field_id) {
+        if (!isset($this->field_config['combined_fields'])) {
+            return false;
+        }
+
+        foreach ($this->field_config['combined_fields'] as $main_field_id => $combined_ids) {
+            if (in_array($field_id, $combined_ids)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Get the field IDs that should be combined with the specified field
+     *
+     * @param string $field_id The main field ID
+     * @return array Array of field IDs to combine
+     */
+    private function get_combined_field_ids($field_id) {
+        if (!isset($this->field_config['combined_fields'])) {
+            return array();
+        }
+
+        if (isset($this->field_config['combined_fields'][$field_id])) {
+            return $this->field_config['combined_fields'][$field_id];
+        }
+
+        return array();
     }
 
     /**
