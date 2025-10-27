@@ -3,7 +3,7 @@
  * Plugin Name: Gravity Forms Webhook Field Mapper
  * Plugin URI: https://github.com/mjhome/gravity-forms-webhook-field-mapper
  * Description: Maps Gravity Forms field IDs to field names in webhook data
- * Version: 1.4.2
+ * Version: 1.4.3
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
@@ -99,8 +99,11 @@ class GF_Webhook_Field_Mapper {
     public function init() {
         // Check if Gravity Forms is active
         if (!class_exists('GFForms')) {
+            $this->log_debug('ERROR: Gravity Forms not active - plugin will not initialize');
             return;
         }
+
+        $this->log_debug('Plugin initializing - Gravity Forms detected');
 
         // Hook into the webhook request data (this modifies the payload)
         add_filter('gform_webhooks_request_data', array($this, 'modify_webhook_data'), 10, 4);
@@ -117,6 +120,25 @@ class GF_Webhook_Field_Mapper {
 
         // Also hook into form submission to verify webhook processing
         add_action('gform_after_submission', array($this, 'log_form_submission'), 10, 2);
+
+        // TROUBLESHOOTING: Check if webhooks addon is active
+        $this->check_webhooks_addon_status();
+    }
+
+    /**
+     * Check if Webhooks Add-On is active and properly configured
+     */
+    private function check_webhooks_addon_status() {
+        $is_addon_active = class_exists('GF_Webhooks');
+
+        $this->log_debug('Webhooks Add-On Status Check', array(
+            'addon_class_exists' => $is_addon_active ? 'YES' : 'NO',
+            'gravityformswebhooks_available' => method_exists('GFForms', 'get_addon_instance') ? 'YES' : 'NO'
+        ));
+
+        if (!$is_addon_active) {
+            $this->log_debug('WARNING: Webhooks Add-On class (GF_Webhooks) not found. Webhooks may not fire automatically.');
+        }
     }
 
     /**
@@ -127,6 +149,7 @@ class GF_Webhook_Field_Mapper {
      * @param array $form The form object
      */
     public function log_webhook_feed_processing($feeds, $entry, $form) {
+        $this->log_debug('========== WEBHOOK FEEDS PRE-PROCESSING ==========');
         $this->log_debug('Webhooks Add-On pre-processing feeds', array(
             'number_of_feeds' => count($feeds),
             'entry_id' => $entry['id'],
@@ -134,15 +157,34 @@ class GF_Webhook_Field_Mapper {
         ));
 
         if (is_array($feeds)) {
+            $will_process_count = 0;
             foreach ($feeds as $feed) {
+                $will_process = $feed['is_active'];
+                if ($will_process) {
+                    $will_process_count++;
+                }
+
                 $this->log_debug('Processing webhook feed', array(
                     'feed_id' => $feed['id'],
                     'feed_name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unknown',
                     'is_active' => $feed['is_active'] ? 'YES' : 'NO',
-                    'request_url' => isset($feed['meta']['requestURL']) ? $feed['meta']['requestURL'] : 'Not set'
+                    'request_url' => isset($feed['meta']['requestURL']) ? $feed['meta']['requestURL'] : 'Not set',
+                    'will_execute' => $will_process ? 'YES - This feed should fire' : 'NO - Feed is inactive'
                 ));
             }
+
+            if ($will_process_count === 0) {
+                $this->log_debug('CRITICAL: No active feeds will be processed. Webhooks will NOT fire!');
+            } else {
+                $this->log_debug('SUCCESS: ' . $will_process_count . ' active feed(s) will be processed.');
+            }
+        } else {
+            $this->log_debug('ERROR: Feeds parameter is not an array!', array(
+                'feeds_type' => gettype($feeds),
+                'feeds_value' => $feeds
+            ));
         }
+        $this->log_debug('========== END WEBHOOK FEEDS PRE-PROCESSING ==========');
     }
 
     /**
@@ -152,18 +194,40 @@ class GF_Webhook_Field_Mapper {
      * @param array $form The form object
      */
     public function log_form_submission($entry, $form) {
+        $this->log_debug('========== FORM SUBMISSION DETECTED ==========');
+
         // Get webhook feeds for this form
         $feeds = GFAPI::get_feeds(null, $form['id'], 'gravityformswebhooks');
 
         $feed_info = array();
         if (is_array($feeds)) {
             foreach ($feeds as $feed) {
-                $feed_info[] = array(
+                $feed_data = array(
                     'id' => $feed['id'],
                     'name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unnamed',
                     'is_active' => $feed['is_active'],
                     'event' => isset($feed['meta']['event']) ? $feed['meta']['event'] : 'not set',
+                    'url' => isset($feed['meta']['requestURL']) ? $feed['meta']['requestURL'] : 'not set',
                 );
+
+                // TROUBLESHOOTING: Check conditional logic
+                if (isset($feed['meta']['feed_condition_conditional_logic'])) {
+                    $feed_data['has_conditional_logic'] = 'YES';
+                    $feed_data['conditional_logic_enabled'] = $feed['meta']['feed_condition_conditional_logic'] == '1' ? 'YES' : 'NO';
+                } else {
+                    $feed_data['has_conditional_logic'] = 'NO';
+                }
+
+                // Check if this feed should process based on conditional logic
+                if (class_exists('GFCommon') && method_exists('GFCommon', 'evaluate_conditional_logic')) {
+                    if (isset($feed['meta']['feed_condition_conditional_logic_object'])) {
+                        $logic = $feed['meta']['feed_condition_conditional_logic_object'];
+                        $is_met = GFCommon::evaluate_conditional_logic($logic, $form, $entry);
+                        $feed_data['conditional_logic_met'] = $is_met ? 'YES' : 'NO';
+                    }
+                }
+
+                $feed_info[] = $feed_data;
             }
         }
 
@@ -171,9 +235,27 @@ class GF_Webhook_Field_Mapper {
             'form_id' => $form['id'],
             'form_title' => $form['title'],
             'entry_id' => $entry['id'],
+            'entry_status' => isset($entry['status']) ? $entry['status'] : 'unknown',
             'webhook_feeds_found' => count($feeds),
             'feeds' => $feed_info
         ));
+
+        // TROUBLESHOOTING: Log if no feeds found
+        if (empty($feeds)) {
+            $this->log_debug('WARNING: No webhook feeds configured for this form. Webhooks will NOT fire.');
+        } else {
+            $active_count = 0;
+            foreach ($feeds as $feed) {
+                if ($feed['is_active']) {
+                    $active_count++;
+                }
+            }
+            if ($active_count === 0) {
+                $this->log_debug('WARNING: All webhook feeds are INACTIVE. Webhooks will NOT fire.');
+            }
+        }
+
+        $this->log_debug('========== END FORM SUBMISSION LOG ==========');
     }
 
     /**
@@ -779,6 +861,16 @@ class GF_Webhook_Field_Mapper {
             'manage_options',                           // Capability
             'gf-webhook-field-config',                  // Menu slug
             array($this, 'render_config_page')          // Callback
+        );
+
+        // Add submenu for troubleshooting
+        add_submenu_page(
+            'gf-webhook-manager',                       // Parent slug
+            'Webhook Troubleshooting',                  // Page title
+            'Troubleshooting',                          // Menu title
+            'manage_options',                           // Capability
+            'gf-webhook-troubleshooting',               // Menu slug
+            array($this, 'render_troubleshooting_page') // Callback
         );
     }
 
@@ -1642,6 +1734,259 @@ class GF_Webhook_Field_Mapper {
         if ($error_count > 0) {
             echo '<div class="notice notice-error"><p>Failed to resend to ' . $error_count . ' webhook(s).</p></div>';
         }
+    }
+
+    /**
+     * Render troubleshooting page
+     */
+    public function render_troubleshooting_page() {
+        ?>
+        <div class="wrap">
+            <h1>Webhook Troubleshooting</h1>
+            <p>Use this page to diagnose why webhooks may not be firing automatically on form submission.</p>
+
+            <?php
+            // Run diagnostics
+            $diagnostics = $this->run_webhook_diagnostics();
+            ?>
+
+            <div class="card" style="max-width: 100%;">
+                <h2>System Status</h2>
+                <table class="widefat striped">
+                    <thead>
+                        <tr>
+                            <th>Check</th>
+                            <th>Status</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($diagnostics['checks'] as $check): ?>
+                            <tr>
+                                <td><strong><?php echo esc_html($check['name']); ?></strong></td>
+                                <td>
+                                    <span style="color: <?php echo $check['status'] === 'pass' ? 'green' : ($check['status'] === 'warning' ? 'orange' : 'red'); ?>; font-weight: bold;">
+                                        <?php echo $check['status'] === 'pass' ? '✓ PASS' : ($check['status'] === 'warning' ? '⚠ WARNING' : '✗ FAIL'); ?>
+                                    </span>
+                                </td>
+                                <td><?php echo esc_html($check['message']); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+
+            <?php if (!empty($diagnostics['forms_with_webhooks'])): ?>
+                <div class="card" style="max-width: 100%; margin-top: 20px;">
+                    <h2>Forms with Webhooks</h2>
+                    <?php foreach ($diagnostics['forms_with_webhooks'] as $form_data): ?>
+                        <h3><?php echo esc_html($form_data['form_title']); ?> (ID: <?php echo esc_html($form_data['form_id']); ?>)</h3>
+                        <table class="widefat striped" style="margin-bottom: 20px;">
+                            <thead>
+                                <tr>
+                                    <th>Webhook Name</th>
+                                    <th>Active</th>
+                                    <th>URL</th>
+                                    <th>Event</th>
+                                    <th>Conditional Logic</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($form_data['webhooks'] as $webhook): ?>
+                                    <tr>
+                                        <td><?php echo esc_html($webhook['name']); ?></td>
+                                        <td>
+                                            <span style="color: <?php echo $webhook['is_active'] ? 'green' : 'red'; ?>; font-weight: bold;">
+                                                <?php echo $webhook['is_active'] ? '✓ YES' : '✗ NO'; ?>
+                                            </span>
+                                        </td>
+                                        <td><small><?php echo esc_html($webhook['url']); ?></small></td>
+                                        <td><?php echo esc_html($webhook['event']); ?></td>
+                                        <td><?php echo esc_html($webhook['conditional_logic']); ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+
+            <div class="card" style="max-width: 100%; margin-top: 20px;">
+                <h2>Troubleshooting Steps</h2>
+                <ol style="line-height: 2;">
+                    <li><strong>Enable WP_DEBUG:</strong> Add <code>define('WP_DEBUG', true);</code> to your wp-config.php file to enable detailed logging.</li>
+                    <li><strong>Check Debug Log:</strong> View <code>wp-content/debug.log</code> for detailed webhook processing logs (lines start with <code>[GF Webhook Field Mapper]</code>).</li>
+                    <li><strong>Verify Webhook Configuration:</strong> Ensure webhooks are ACTIVE in the form's Webhooks settings.</li>
+                    <li><strong>Check Conditional Logic:</strong> If using conditional logic, verify the conditions are met when submitting the form.</li>
+                    <li><strong>Test with Manual Resend:</strong> Try manually resending an entry from the Webhook Manager to see if the webhook fires.</li>
+                    <li><strong>Check Feed Event Type:</strong> Ensure the webhook event is set to "form_submission" (not "form_payment_completed" unless using payments).</li>
+                </ol>
+            </div>
+
+            <div class="card" style="max-width: 100%; margin-top: 20px;">
+                <h2>Common Issues</h2>
+                <table class="widefat striped">
+                    <thead>
+                        <tr>
+                            <th>Issue</th>
+                            <th>Solution</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Webhook feeds are inactive</td>
+                            <td>Go to Forms → Settings → Webhooks and activate the webhook feed(s).</td>
+                        </tr>
+                        <tr>
+                            <td>Conditional logic not met</td>
+                            <td>Review the conditional logic settings on the webhook feed. Test with a submission that meets the conditions.</td>
+                        </tr>
+                        <tr>
+                            <td>Webhooks Add-On not installed/active</td>
+                            <td>Install and activate the Gravity Forms Webhooks Add-On from your GravityForms.com account.</td>
+                        </tr>
+                        <tr>
+                            <td>No webhook URL configured</td>
+                            <td>Ensure the webhook feed has a valid URL in the "Request URL" field.</td>
+                        </tr>
+                        <tr>
+                            <td>Wrong event type selected</td>
+                            <td>For standard forms, use "form_submission" event. Only use payment events if you have payment integrations.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <?php
+    }
+
+    /**
+     * Run webhook diagnostics
+     *
+     * @return array Diagnostic results
+     */
+    private function run_webhook_diagnostics() {
+        $results = array(
+            'checks' => array(),
+            'forms_with_webhooks' => array()
+        );
+
+        // Check 1: Gravity Forms installed
+        if (class_exists('GFForms')) {
+            $results['checks'][] = array(
+                'name' => 'Gravity Forms',
+                'status' => 'pass',
+                'message' => 'Gravity Forms is installed and active'
+            );
+        } else {
+            $results['checks'][] = array(
+                'name' => 'Gravity Forms',
+                'status' => 'fail',
+                'message' => 'Gravity Forms is NOT installed or active'
+            );
+            return $results; // Can't continue without GF
+        }
+
+        // Check 2: Webhooks Add-On
+        if (class_exists('GF_Webhooks')) {
+            $results['checks'][] = array(
+                'name' => 'Webhooks Add-On',
+                'status' => 'pass',
+                'message' => 'Webhooks Add-On is installed and active'
+            );
+        } else {
+            $results['checks'][] = array(
+                'name' => 'Webhooks Add-On',
+                'status' => 'fail',
+                'message' => 'Webhooks Add-On is NOT installed or active - webhooks will NOT fire automatically'
+            );
+        }
+
+        // Check 3: WP_DEBUG enabled
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            $results['checks'][] = array(
+                'name' => 'Debug Logging',
+                'status' => 'pass',
+                'message' => 'WP_DEBUG is enabled - check wp-content/debug.log for webhook logs'
+            );
+        } else {
+            $results['checks'][] = array(
+                'name' => 'Debug Logging',
+                'status' => 'warning',
+                'message' => 'WP_DEBUG is disabled - enable it in wp-config.php to see detailed logs'
+            );
+        }
+
+        // Check 4: Get all forms with webhooks
+        $forms = GFAPI::get_forms();
+        $forms_with_webhooks = 0;
+        $total_active_webhooks = 0;
+
+        if (!is_wp_error($forms) && is_array($forms)) {
+            foreach ($forms as $form) {
+                $feeds = GFAPI::get_feeds(null, $form['id'], 'gravityformswebhooks');
+
+                if (!empty($feeds)) {
+                    $forms_with_webhooks++;
+                    $webhook_info = array();
+
+                    foreach ($feeds as $feed) {
+                        if ($feed['is_active']) {
+                            $total_active_webhooks++;
+                        }
+
+                        $conditional_logic_status = 'None';
+                        if (isset($feed['meta']['feed_condition_conditional_logic']) && $feed['meta']['feed_condition_conditional_logic'] == '1') {
+                            $conditional_logic_status = 'Enabled';
+                        }
+
+                        $webhook_info[] = array(
+                            'name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unnamed',
+                            'is_active' => $feed['is_active'],
+                            'url' => isset($feed['meta']['requestURL']) ? $feed['meta']['requestURL'] : 'Not set',
+                            'event' => isset($feed['meta']['event']) ? $feed['meta']['event'] : 'form_submission',
+                            'conditional_logic' => $conditional_logic_status
+                        );
+                    }
+
+                    $results['forms_with_webhooks'][] = array(
+                        'form_id' => $form['id'],
+                        'form_title' => $form['title'],
+                        'webhooks' => $webhook_info
+                    );
+                }
+            }
+        }
+
+        if ($forms_with_webhooks > 0) {
+            $results['checks'][] = array(
+                'name' => 'Webhook Configuration',
+                'status' => 'pass',
+                'message' => sprintf('%d form(s) have webhook feeds configured', $forms_with_webhooks)
+            );
+        } else {
+            $results['checks'][] = array(
+                'name' => 'Webhook Configuration',
+                'status' => 'warning',
+                'message' => 'No forms have webhooks configured'
+            );
+        }
+
+        if ($total_active_webhooks > 0) {
+            $results['checks'][] = array(
+                'name' => 'Active Webhooks',
+                'status' => 'pass',
+                'message' => sprintf('%d active webhook(s) found', $total_active_webhooks)
+            );
+        } else {
+            $results['checks'][] = array(
+                'name' => 'Active Webhooks',
+                'status' => 'fail',
+                'message' => 'No ACTIVE webhooks found - all webhooks are inactive or no webhooks configured'
+            );
+        }
+
+        return $results;
     }
 }
 
