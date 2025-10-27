@@ -3,7 +3,7 @@
  * Plugin Name: Gravity Forms Webhook Field Mapper
  * Plugin URI: https://github.com/mjhome/gravity-forms-webhook-field-mapper
  * Description: Maps Gravity Forms field IDs to field names in webhook data
- * Version: 1.4.4
+ * Version: 1.4.5
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
@@ -121,6 +121,9 @@ class GF_Webhook_Field_Mapper {
         // Hook into feed processing (alternative approach)
         add_action('gform_gravityformswebhooks_pre_process_feeds', array($this, 'log_webhook_feed_processing'), 10, 3);
 
+        // TROUBLESHOOTING: Hook to see if individual feeds are being processed
+        add_filter('gform_webhooks_is_feed_condition_met', array($this, 'log_feed_condition_check'), 10, 4);
+
         // Also hook into form submission to verify webhook processing
         add_action('gform_after_submission', array($this, 'log_form_submission'), 10, 2);
 
@@ -202,6 +205,27 @@ class GF_Webhook_Field_Mapper {
             ));
         }
         $this->log_debug('========== END WEBHOOK FEEDS PRE-PROCESSING ==========');
+    }
+
+    /**
+     * Log when feed condition is being checked
+     *
+     * @param bool $is_met Whether the condition is met
+     * @param array $feed The webhook feed
+     * @param array $entry The entry
+     * @param array $form The form
+     * @return bool Pass through the original value
+     */
+    public function log_feed_condition_check($is_met, $feed, $entry, $form) {
+        $this->log_debug('FEED CONDITION CHECK', array(
+            'feed_id' => isset($feed['id']) ? $feed['id'] : 'unknown',
+            'feed_name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'unknown',
+            'condition_met' => $is_met ? 'YES - Feed WILL execute' : 'NO - Feed will NOT execute',
+            'entry_id' => $entry['id'],
+            'form_id' => $form['id']
+        ));
+
+        return $is_met;
     }
 
     /**
