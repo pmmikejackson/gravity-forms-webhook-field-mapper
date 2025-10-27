@@ -324,9 +324,17 @@ class GF_Webhook_Field_Mapper {
      * @noinspection PhpUnusedParameterInspection
      */
     public function modify_webhook_data($request_data, $feed, $entry, $form) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter
+        // Log which webhook this data is being prepared for
+        $webhook_url = isset($feed['meta']['requestURL']) ? $feed['meta']['requestURL'] : 'unknown';
+        $webhook_name = isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'unknown';
+
+        $this->log_debug('========== WEBHOOK DATA MODIFICATION START ==========');
         $this->log_debug('Webhook data modification started', array(
             'form_id' => $form['id'],
             'entry_id' => $entry['id'],
+            'webhook_name' => $webhook_name,
+            'webhook_url' => $webhook_url,
+            'feed_id' => isset($feed['id']) ? $feed['id'] : 'unknown',
             'filter_mode' => $this->field_config['mode'],
             'include_empty' => $this->field_config['include_empty']
         ));
