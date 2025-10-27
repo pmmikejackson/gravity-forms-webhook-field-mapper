@@ -115,6 +115,9 @@ class GF_Webhook_Field_Mapper {
         // Note: This action may not exist in all GF versions
         add_action('gform_post_send_entry_to_webhook', array($this, 'log_webhook_sent'), 10, 4);
 
+        // TROUBLESHOOTING: Additional hook that exists in newer versions
+        add_action('gform_webhooks_post_send', array($this, 'log_webhook_post_send'), 10, 4);
+
         // Hook into feed processing (alternative approach)
         add_action('gform_gravityformswebhooks_pre_process_feeds', array($this, 'log_webhook_feed_processing'), 10, 3);
 
@@ -302,14 +305,46 @@ class GF_Webhook_Field_Mapper {
      * @param array $form The form
      */
     public function log_webhook_sent($response, $feed, $entry, $form) {
+        $response_code = is_array($response) && isset($response['response']['code']) ? $response['response']['code'] : 'Unknown';
+        $is_success = $response_code >= 200 && $response_code < 300;
+
+        $this->log_debug('========== WEBHOOK SENT (AUTOMATIC) ==========');
         $this->log_debug('Webhook sent', array(
             'form_id' => $form['id'],
             'form_title' => $form['title'],
             'entry_id' => $entry['id'],
+            'feed_id' => isset($feed['id']) ? $feed['id'] : 'Unknown',
             'webhook_name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unknown',
             'webhook_url' => isset($feed['meta']['requestURL']) ? $feed['meta']['requestURL'] : 'Unknown',
-            'response_code' => is_array($response) && isset($response['response']['code']) ? $response['response']['code'] : 'Unknown'
+            'response_code' => $response_code,
+            'success' => $is_success ? 'YES' : 'NO'
         ));
+
+        if (!$is_success && is_array($response) && isset($response['response']['message'])) {
+            $this->log_debug('Webhook FAILED - Response details', array(
+                'error_message' => $response['response']['message'],
+                'response_body' => isset($response['body']) ? substr($response['body'], 0, 500) : 'N/A'
+            ));
+        }
+    }
+
+    /**
+     * Alternative hook for webhook post-send logging
+     *
+     * @param array $response The response from the webhook
+     * @param array $feed The webhook feed
+     * @param array $entry The entry
+     * @param array $form The form
+     */
+    public function log_webhook_post_send($response, $feed, $entry, $form) {
+        // Just log that this hook fired
+        $this->log_debug('gform_webhooks_post_send hook fired', array(
+            'webhook_name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unknown',
+            'webhook_url' => isset($feed['meta']['requestURL']) ? $feed['meta']['requestURL'] : 'Unknown'
+        ));
+
+        // Call the main logging method
+        $this->log_webhook_sent($response, $feed, $entry, $form);
     }
 
     /**
