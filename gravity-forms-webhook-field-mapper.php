@@ -1794,9 +1794,52 @@ class GF_Webhook_Field_Mapper {
     }
 
     /**
+     * Fix webhook feeds missing event type
+     */
+    public function fix_webhook_event_types() {
+        if (!current_user_can('manage_options')) {
+            wp_die(__('You do not have sufficient permissions to access this page.'));
+        }
+
+        $fixed_count = 0;
+        $forms = GFAPI::get_forms();
+
+        if (!is_wp_error($forms) && is_array($forms)) {
+            foreach ($forms as $form) {
+                $feeds = GFAPI::get_feeds(null, $form['id'], 'gravityformswebhooks');
+
+                if (!empty($feeds)) {
+                    foreach ($feeds as $feed) {
+                        // Check if event type is missing
+                        if (!isset($feed['meta']['event']) || empty($feed['meta']['event'])) {
+                            // Set default event type to form_submission
+                            $feed['meta']['event'] = 'form_submission';
+                            GFAPI::update_feed($feed['id'], $feed['meta']);
+                            $fixed_count++;
+
+                            $this->log_debug('Fixed webhook feed event type', array(
+                                'feed_id' => $feed['id'],
+                                'feed_name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unknown',
+                                'set_event_to' => 'form_submission'
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        return $fixed_count;
+    }
+
+    /**
      * Render troubleshooting page
      */
     public function render_troubleshooting_page() {
+        // Handle fix action
+        if (isset($_POST['fix_event_types']) && check_admin_referer('fix_webhook_event_types', 'fix_webhook_nonce')) {
+            $fixed_count = $this->fix_webhook_event_types();
+            echo '<div class="notice notice-success"><p>Fixed ' . $fixed_count . ' webhook feed(s) by setting event type to "form_submission".</p></div>';
+        }
         ?>
         <div class="wrap">
             <h1>Webhook Troubleshooting</h1>
@@ -1867,6 +1910,23 @@ class GF_Webhook_Field_Mapper {
                     <?php endforeach; ?>
                 </div>
             <?php endif; ?>
+
+            <div class="card" style="max-width: 100%; margin-top: 20px; background: #fffbcc; border-left: 4px solid #ffb900;">
+                <h2>⚠️ Quick Fix: Missing Event Types</h2>
+                <p><strong>If your debug log shows <code>[event_type] => NOT SET</code>, this is likely preventing webhooks from firing automatically.</strong></p>
+                <p>This plugin can automatically fix this by setting the event type to "form_submission" for all webhook feeds that are missing it.</p>
+
+                <form method="post" action="" onsubmit="return confirm('This will update all webhook feeds that have no event type set. Continue?');">
+                    <?php wp_nonce_field('fix_webhook_event_types', 'fix_webhook_nonce'); ?>
+                    <p>
+                        <button type="submit" name="fix_event_types" class="button button-primary button-large">
+                            🔧 Fix Missing Event Types
+                        </button>
+                    </p>
+                </form>
+
+                <p><small><strong>What this does:</strong> Sets <code>event = "form_submission"</code> for any webhook feed that doesn't have an event type configured.</small></p>
+            </div>
 
             <div class="card" style="max-width: 100%; margin-top: 20px;">
                 <h2>Troubleshooting Steps</h2>
