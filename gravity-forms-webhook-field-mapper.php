@@ -3,7 +3,7 @@
  * Plugin Name: Gravity Forms Webhook Field Mapper
  * Plugin URI: https://github.com/mjhome/gravity-forms-webhook-field-mapper
  * Description: Maps Gravity Forms field IDs to field names in webhook data
- * Version: 1.4.7
+ * Version: 1.5.0
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
@@ -127,6 +127,9 @@ class GF_Webhook_Field_Mapper {
         // Also hook into form submission to verify webhook processing
         add_action('gform_after_submission', array($this, 'log_form_submission'), 10, 2);
 
+        // WORKAROUND: Since Webhooks Add-On automatic processing is broken, send webhooks directly
+        add_action('gform_after_submission', array($this, 'send_webhooks_directly'), 20, 2);
+
         // TROUBLESHOOTING: Check if webhooks addon is active
         $this->check_webhooks_addon_status();
     }
@@ -226,6 +229,56 @@ class GF_Webhook_Field_Mapper {
         ));
 
         return $is_met;
+    }
+
+    /**
+     * WORKAROUND: Send webhooks directly bypassing the broken Webhooks Add-On
+     *
+     * @param array $entry The entry that was submitted
+     * @param array $form The form object
+     */
+    public function send_webhooks_directly($entry, $form) {
+        $this->log_debug('========== DIRECT WEBHOOK SENDING (WORKAROUND) ==========');
+
+        // Get all webhook feeds for this form
+        $feeds = GFAPI::get_feeds(null, $form['id'], 'gravityformswebhooks');
+
+        if (empty($feeds)) {
+            $this->log_debug('No webhook feeds found for this form - skipping direct send');
+            return;
+        }
+
+        $sent_count = 0;
+        foreach ($feeds as $feed) {
+            // Only process active feeds
+            if (!$feed['is_active']) {
+                $this->log_debug('Skipping inactive feed', array('feed_id' => $feed['id']));
+                continue;
+            }
+
+            // Send the webhook using our existing send method
+            $result = $this->send_webhook($entry, $form, $feed);
+
+            if ($result['success']) {
+                $sent_count++;
+                $this->log_debug('DIRECT SEND SUCCESS', array(
+                    'feed_name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unknown',
+                    'webhook_url' => isset($feed['meta']['requestURL']) ? $feed['meta']['requestURL'] : 'Unknown',
+                    'response_code' => $result['response_code']
+                ));
+            } else {
+                $this->log_debug('DIRECT SEND FAILED', array(
+                    'feed_name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unknown',
+                    'webhook_url' => isset($feed['meta']['requestURL']) ? $feed['meta']['requestURL'] : 'Unknown',
+                    'error' => $result['message']
+                ));
+            }
+        }
+
+        $this->log_debug('Direct webhook sending complete', array(
+            'total_feeds' => count($feeds),
+            'sent_successfully' => $sent_count
+        ));
     }
 
     /**
