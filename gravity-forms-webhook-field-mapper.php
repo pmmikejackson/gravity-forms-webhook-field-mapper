@@ -3,7 +3,7 @@
  * Plugin Name: Gravity Forms Webhook Field Mapper
  * Plugin URI: https://github.com/mjhome/gravity-forms-webhook-field-mapper
  * Description: Maps Gravity Forms field IDs to field names in webhook data
- * Version: 1.4.5
+ * Version: 1.4.6
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
@@ -1886,6 +1886,35 @@ class GF_Webhook_Field_Mapper {
     }
 
     /**
+     * Dump full feed configurations to debug log
+     */
+    private function dump_feed_configurations() {
+        $forms = GFAPI::get_forms();
+
+        if (!is_wp_error($forms) && is_array($forms)) {
+            foreach ($forms as $form) {
+                $feeds = GFAPI::get_feeds(null, $form['id'], 'gravityformswebhooks');
+
+                if (!empty($feeds)) {
+                    $this->log_debug('========== FULL FEED DUMP FOR FORM: ' . $form['title'] . ' ==========');
+
+                    foreach ($feeds as $feed) {
+                        $this->log_debug('FEED DUMP', array(
+                            'feed_id' => $feed['id'],
+                            'form_id' => $feed['form_id'],
+                            'is_active' => $feed['is_active'],
+                            'addon_slug' => $feed['addon_slug'],
+                            'FULL_META' => $feed['meta']
+                        ));
+                    }
+                }
+            }
+        }
+
+        $this->log_debug('========== END FEED CONFIGURATION DUMP ==========');
+    }
+
+    /**
      * Render troubleshooting page
      */
     public function render_troubleshooting_page() {
@@ -1893,6 +1922,12 @@ class GF_Webhook_Field_Mapper {
         if (isset($_POST['fix_event_types']) && check_admin_referer('fix_webhook_event_types', 'fix_webhook_nonce')) {
             $fixed_count = $this->fix_webhook_event_types();
             echo '<div class="notice notice-success"><p>Fixed ' . $fixed_count . ' webhook feed(s) by setting event type to "form_submission".</p></div>';
+        }
+
+        // Handle dump feed config action
+        if (isset($_POST['dump_feed_config']) && check_admin_referer('dump_feed_config', 'dump_feed_nonce')) {
+            $this->dump_feed_configurations();
+            echo '<div class="notice notice-success"><p>Feed configurations dumped to debug log. Check wp-content/debug.log for details.</p></div>';
         }
         ?>
         <div class="wrap">
@@ -1980,6 +2015,22 @@ class GF_Webhook_Field_Mapper {
                 </form>
 
                 <p><small><strong>What this does:</strong> Sets <code>event = "form_submission"</code> for any webhook feed that doesn't have an event type configured.</small></p>
+            </div>
+
+            <div class="card" style="max-width: 100%; margin-top: 20px; background: #fff3cd; border-left: 4px solid #ffc107;">
+                <h2>🔍 Advanced: Dump Feed Configuration</h2>
+                <p>If webhooks still don't fire after fixing event types, dump the full feed configuration to see what the Webhooks Add-On is reading.</p>
+
+                <form method="post" action="">
+                    <?php wp_nonce_field('dump_feed_config', 'dump_feed_nonce'); ?>
+                    <p>
+                        <button type="submit" name="dump_feed_config" class="button button-secondary">
+                            📋 Dump Feed Configuration to Debug Log
+                        </button>
+                    </p>
+                </form>
+
+                <p><small>This will write the complete feed metadata to the debug log for analysis.</small></p>
             </div>
 
             <div class="card" style="max-width: 100%; margin-top: 20px;">
