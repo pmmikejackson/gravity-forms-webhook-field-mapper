@@ -149,11 +149,12 @@ class GF_Webhook_Field_Mapper {
      * @param array $form The form object
      */
     public function log_webhook_feed_processing($feeds, $entry, $form) {
-        $this->log_debug('========== WEBHOOK FEEDS PRE-PROCESSING ==========');
+        $this->log_debug('========== WEBHOOK FEEDS PRE-PROCESSING (AUTOMATIC) ==========');
         $this->log_debug('Webhooks Add-On pre-processing feeds', array(
             'number_of_feeds' => count($feeds),
             'entry_id' => $entry['id'],
-            'form_id' => $form['id']
+            'form_id' => $form['id'],
+            'trigger_type' => 'AUTOMATIC (form submission)'
         ));
 
         if (is_array($feeds)) {
@@ -164,13 +165,26 @@ class GF_Webhook_Field_Mapper {
                     $will_process_count++;
                 }
 
+                // Check event type
+                $event_type = isset($feed['meta']['event']) ? $feed['meta']['event'] : 'NOT SET';
+                $request_method = isset($feed['meta']['requestMethod']) ? $feed['meta']['requestMethod'] : 'POST';
+                $request_format = isset($feed['meta']['requestFormat']) ? $feed['meta']['requestFormat'] : 'json';
+
                 $this->log_debug('Processing webhook feed', array(
                     'feed_id' => $feed['id'],
                     'feed_name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unknown',
                     'is_active' => $feed['is_active'] ? 'YES' : 'NO',
                     'request_url' => isset($feed['meta']['requestURL']) ? $feed['meta']['requestURL'] : 'Not set',
+                    'event_type' => $event_type,
+                    'request_method' => $request_method,
+                    'request_format' => $request_format,
                     'will_execute' => $will_process ? 'YES - This feed should fire' : 'NO - Feed is inactive'
                 ));
+
+                // WARNING: If event type is not set or wrong
+                if ($event_type === 'NOT SET' || empty($event_type)) {
+                    $this->log_debug('WARNING: Event type not set for feed "' . (isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : $feed['id']) . '" - This may prevent automatic firing!');
+                }
             }
 
             if ($will_process_count === 0) {
