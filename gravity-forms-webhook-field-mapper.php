@@ -3,7 +3,7 @@
  * Plugin Name: Gravity Forms Webhook Field Mapper
  * Plugin URI: https://github.com/mjhome/gravity-forms-webhook-field-mapper
  * Description: Maps Gravity Forms field IDs to field names in webhook data
- * Version: 1.4.3
+ * Version: 1.4.4
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
@@ -1810,22 +1810,52 @@ class GF_Webhook_Field_Mapper {
 
                 if (!empty($feeds)) {
                     foreach ($feeds as $feed) {
-                        // Check if event type is missing
-                        if (!isset($feed['meta']['event']) || empty($feed['meta']['event'])) {
+                        $this->log_debug('Checking feed for event type', array(
+                            'feed_id' => $feed['id'],
+                            'feed_name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unknown',
+                            'current_event' => isset($feed['meta']['event']) ? $feed['meta']['event'] : 'NOT SET',
+                            'has_event_key' => isset($feed['meta']['event']) ? 'YES' : 'NO',
+                            'event_is_empty' => empty($feed['meta']['event']) ? 'YES' : 'NO'
+                        ));
+
+                        // Check if event type is missing or explicitly set to empty
+                        if (!isset($feed['meta']['event']) || $feed['meta']['event'] === '' || $feed['meta']['event'] === null) {
                             // Set default event type to form_submission
                             $feed['meta']['event'] = 'form_submission';
-                            GFAPI::update_feed($feed['id'], $feed['meta']);
-                            $fixed_count++;
 
-                            $this->log_debug('Fixed webhook feed event type', array(
-                                'feed_id' => $feed['id'],
-                                'feed_name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unknown',
-                                'set_event_to' => 'form_submission'
-                            ));
+                            $result = GFAPI::update_feed($feed['id'], $feed['meta']);
+
+                            if (is_wp_error($result)) {
+                                $this->log_debug('ERROR updating feed', array(
+                                    'feed_id' => $feed['id'],
+                                    'error' => $result->get_error_message()
+                                ));
+                            } else {
+                                $fixed_count++;
+                                $this->log_debug('Successfully fixed webhook feed event type', array(
+                                    'feed_id' => $feed['id'],
+                                    'feed_name' => isset($feed['meta']['feedName']) ? $feed['meta']['feedName'] : 'Unknown',
+                                    'set_event_to' => 'form_submission',
+                                    'update_result' => $result
+                                ));
+
+                                // Verify the update by re-reading the feed
+                                $updated_feed = GFAPI::get_feed($feed['id']);
+                                $this->log_debug('Verification after update', array(
+                                    'feed_id' => $feed['id'],
+                                    'new_event_value' => isset($updated_feed['meta']['event']) ? $updated_feed['meta']['event'] : 'STILL NOT SET'
+                                ));
+                            }
                         }
                     }
                 }
             }
+        }
+
+        // Clear any Gravity Forms caches
+        if (class_exists('GFCache')) {
+            GFCache::flush();
+            $this->log_debug('Cleared Gravity Forms cache');
         }
 
         return $fixed_count;
