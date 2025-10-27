@@ -2,20 +2,38 @@
 
 ## Problem Identified
 
-Your debug logs show: `event => not set`
+Your debug logs show: `[event_type] => NOT SET`
 
-This means the webhook feed doesn't have an event type configured, which prevents it from firing automatically even though:
+This means the webhook feeds don't have an event type configured, which prevents them from firing automatically even though:
 - ✅ The Webhooks Add-On is working
 - ✅ Manual resend works perfectly
-- ✅ The NowCerts endpoint is reachable
+- ✅ The webhook endpoints are reachable
 
-## Solution
+## Automatic Solution (Recommended)
 
-### Set the Event Type:
+### Use the Built-In Fix Tool:
+
+1. **Go to:** WordPress Admin → **Webhook Manager** → **Troubleshooting**
+
+2. **Look for the yellow box:** "⚠️ Quick Fix: Missing Event Types"
+
+3. **Click:** "🔧 Fix Missing Event Types" button
+
+4. **Confirm** the action when prompted
+
+5. **Done!** All webhook feeds will now have `event = "form_submission"` set
+
+6. **Test:** Submit your form again - webhooks should now fire automatically
+
+This is the fastest and safest way to fix the issue.
+
+## Manual Solution (If UI Option Available)
+
+If the event type field is available in your Webhooks Add-On UI:
 
 1. **WordPress Admin** → **Forms** → Select your form → **Settings** → **Webhooks**
 
-2. **Find your webhook feed** (e.g., "NowCerts Webhook" or "Guard Momentum Webhook")
+2. **Find your webhook feed** (e.g., "Guard Momentum Webhook")
 
 3. **Click "Edit"** on the webhook
 
@@ -27,6 +45,8 @@ This means the webhook feed doesn't have an event type configured, which prevent
 6. **Click "Save Settings"** or "Update Feed"
 
 7. **Test:** Submit your form again
+
+**Note:** Some versions of the Webhooks Add-On don't show this field in the UI, which is why the automatic fix tool was created.
 
 ## Why This Fixes It
 
