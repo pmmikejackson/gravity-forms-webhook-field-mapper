@@ -3,7 +3,7 @@
  * Plugin Name: Gravity Forms Webhook Field Mapper
  * Plugin URI: https://github.com/mjhome/gravity-forms-webhook-field-mapper
  * Description: Maps Gravity Forms field IDs to field names in webhook data
- * Version: 1.4.6
+ * Version: 1.4.7
  * Author: Mike Jackson with Claude
  * License: GPL v2 or later
  * Text Domain: gf-webhook-field-mapper
@@ -1842,10 +1842,19 @@ class GF_Webhook_Field_Mapper {
                             'event_is_empty' => empty($feed['meta']['event']) ? 'YES' : 'NO'
                         ));
 
-                        // Check if event type is missing or explicitly set to empty
-                        if (!isset($feed['meta']['event']) || $feed['meta']['event'] === '' || $feed['meta']['event'] === null) {
-                            // Set default event type to form_submission
+                        // Check if event type is missing in BOTH possible locations
+                        $top_level_event = isset($feed['meta']['event']) ? $feed['meta']['event'] : '';
+                        $feed_condition_event = isset($feed['meta']['feedCondition']['event']) ? $feed['meta']['feedCondition']['event'] : '';
+
+                        if (empty($top_level_event) && empty($feed_condition_event)) {
+                            // Set event type in BOTH locations to be safe
                             $feed['meta']['event'] = 'form_submission';
+
+                            // Also set it in the feedCondition array (where Webhooks Add-On actually reads it)
+                            if (!isset($feed['meta']['feedCondition'])) {
+                                $feed['meta']['feedCondition'] = array();
+                            }
+                            $feed['meta']['feedCondition']['event'] = 'form_submission';
 
                             $result = GFAPI::update_feed($feed['id'], $feed['meta']);
 
